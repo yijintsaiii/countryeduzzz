@@ -2,9 +2,6 @@
 
 import { useEffect, useRef, useState, useCallback } from "react"
 import { motion } from "framer-motion"
-import { ArrowDown } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import Link from "next/link"
 
 // Hero Section with persistent cursor-based fog reveal animation
 export function HeroSection() {
@@ -46,6 +43,9 @@ export function HeroSection() {
   const lastMaskCommitAtRef = useRef(0)
   const isMobileScrollModeRef = useRef(false)
   const mobileClearProgressRef = useRef(0)
+  const cursorCoreRef = useRef<HTMLDivElement>(null)
+  const cursorRingRef = useRef<HTMLDivElement>(null)
+  const cursorInteractiveRef = useRef(false)
 
   // For "almost clear" end-state (still persistent, never recovers).
   const pathEnergyRef = useRef(0)
@@ -206,6 +206,22 @@ export function HeroSection() {
         if (envFogRef.current) envFogRef.current.style.opacity = `${0.92 - p * 0.78}`
         if (midFogRef.current) midFogRef.current.style.opacity = `${0.86 - p * 0.78}`
         if (floatFogRef.current) floatFogRef.current.style.opacity = `${0.20 - p * 0.16}`
+      }
+
+      // Desktop-only custom cursor in Hero (stable, subtle).
+      if (!mobileMode && cursorCoreRef.current && cursorRingRef.current) {
+        const cx = s.x
+        const cy = s.y
+        const isNearRoute = Math.abs(dx) < 0.16
+        const isInteractive = cursorInteractiveRef.current
+
+        cursorCoreRef.current.style.transform = `translate3d(${cx}px, ${cy}px, 0) translate(-50%, -50%) scale(${isInteractive ? 1.25 : 1})`
+        cursorCoreRef.current.style.opacity = isHoveringHeroRef.current ? "0.95" : "0"
+
+        const ringScale = isInteractive ? 1.42 : isNearRoute ? 1.16 : 1
+        const ringOpacity = isInteractive ? 0.58 : isNearRoute ? 0.42 : 0.28
+        cursorRingRef.current.style.transform = `translate3d(${cx}px, ${cy}px, 0) translate(-50%, -50%) scale(${ringScale})`
+        cursorRingRef.current.style.opacity = isHoveringHeroRef.current ? `${ringOpacity}` : "0"
       }
 
       if (maskDirtyRef.current && performance.now() - lastMaskCommitAtRef.current > 96) {
@@ -386,6 +402,8 @@ export function HeroSection() {
     const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left))
     const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top))
     mousePosition.current = { x, y }
+    const target = e?.target as HTMLElement | null
+    cursorInteractiveRef.current = !!target?.closest("a, button, [role='button']")
     stampAtPoint(x, y, "mouse")
   }, [])
 
@@ -430,6 +448,7 @@ export function HeroSection() {
     isTouchInteractingRef.current = false
     touchIdRef.current = null
     lastStampRef.current = null
+    cursorInteractiveRef.current = false
   }, [])
 
   return (
@@ -449,6 +468,26 @@ export function HeroSection() {
       onTouchEnd={handleHeroTouchEnd}
       onTouchCancel={handleHeroTouchEnd}
     >
+      {/* Desktop custom cursor (Hero-only) */}
+      <div className="pointer-events-none absolute inset-0 z-[55] hidden md:block">
+        <div
+          ref={cursorRingRef}
+          className="absolute h-7 w-7 rounded-full border border-[#cbfd3c]/55 bg-transparent transition-[transform,opacity,border-color] duration-150 ease-out"
+          style={{
+            opacity: 0,
+            boxShadow: "0 0 14px rgba(203,253,60,0.18)",
+          }}
+        />
+        <div
+          ref={cursorCoreRef}
+          className="absolute h-2.5 w-2.5 rounded-full bg-[#cbfd3c] transition-[transform,opacity] duration-100 ease-out"
+          style={{
+            opacity: 0,
+            boxShadow: "0 0 8px rgba(203,253,60,0.42)",
+          }}
+        />
+      </div>
+
       {/* ── Ambient brand composition (z-0) ──────────────────────────────── */}
       <div className="pointer-events-none absolute inset-0 z-0">
         <motion.div
@@ -665,45 +704,6 @@ export function HeroSection() {
             <br className="hidden sm:block" />
             在多變的環境中找到前進的方向
           </motion.p>
-
-          {/* CTAs */}
-          <motion.div
-            initial={{ opacity: 0, y: 22 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.85, delay: 1.3, ease: "easeOut" }}
-            className="mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row sm:gap-5"
-          >
-            <motion.div
-              whileHover={{ scale: 1.04, y: -2 }}
-              whileTap={{ scale: 0.98 }}
-              transition={{ type: "spring", stiffness: 400, damping: 17 }}
-            >
-              <Button
-                size="lg"
-                className="gap-2.5 bg-emerald-800 px-8 py-6 text-base font-semibold text-white shadow-lg transition-all hover:bg-emerald-900 hover:shadow-[0_0_0_2px_rgba(199,255,58,0.35)]"
-                asChild
-              >
-                <Link href="/for/students">
-                  開始探索
-                  <ArrowDown className="h-4 w-4 text-[#C7FF3A]" />
-                </Link>
-              </Button>
-            </motion.div>
-
-            <motion.div
-              whileHover={{ scale: 1.04, y: -2 }}
-              whileTap={{ scale: 0.98 }}
-              transition={{ type: "spring", stiffness: 400, damping: 17 }}
-            >
-              <Button
-                size="lg"
-                className="border-2 border-emerald-800 bg-white/60 px-8 py-6 text-base font-semibold text-emerald-950 transition-all hover:border-[#C7FF3A] hover:bg-[#F3FFD2]"
-                asChild
-              >
-                <Link href="/about">認識鄉育</Link>
-              </Button>
-            </motion.div>
-          </motion.div>
         </div>
       </div>
 
