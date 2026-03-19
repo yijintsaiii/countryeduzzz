@@ -40,9 +40,12 @@ export function HeroSection() {
   const midMaskCtxRef = useRef<CanvasRenderingContext2D | null>(null)
   const floatMaskCtxRef = useRef<CanvasRenderingContext2D | null>(null)
 
-  const maskScale = 0.36
+  const maskScale = 0.42
   const lastStampRef = useRef<{ x: number; y: number } | null>(null)
   const lastPointerEventAtRef = useRef(0)
+  const lastMaskCommitAtRef = useRef(0)
+  const isMobileScrollModeRef = useRef(false)
+  const mobileClearProgressRef = useRef(0)
 
   // For "almost clear" end-state (still persistent, never recovers).
   const pathEnergyRef = useRef(0)
@@ -116,6 +119,7 @@ export function HeroSection() {
       const ctx = canvas.getContext("2d")
       if (!ctx) return
       ctxRef.current = ctx
+      ctx.imageSmoothingEnabled = true
 
       // White/opaque mask => fog fully visible.
       ctx.globalCompositeOperation = "source-over"
@@ -141,6 +145,9 @@ export function HeroSection() {
       }
       smoothedMousePosition.current = { ...mousePosition.current }
 
+      // Mobile/tablet uses scroll-to-clear instead of touch-path reveal.
+      isMobileScrollModeRef.current = window.matchMedia("(max-width: 1024px), (pointer: coarse)").matches
+
       // If user resizes, reset masks (rare), but never "restore" during a session.
       initMaskCanvas(envMaskCanvasRef.current, envMaskCtxRef)
       initMaskCanvas(midMaskCanvasRef.current, midMaskCtxRef)
@@ -157,6 +164,7 @@ export function HeroSection() {
       const rect = heroRectRef.current
       const s = smoothedMousePosition.current
       const t = mousePosition.current
+      const mobileMode = isMobileScrollModeRef.current
 
       // Inertia-like smoothing for natural motion.
       s.x += (t.x - s.x) * 0.14
@@ -169,27 +177,39 @@ export function HeroSection() {
       const active = hoverLocal
 
       // Subtle displacement to make interaction feel alive (mask is the main reveal).
-      let driftX = 0
-      let driftY = 0
-      if (active > 0) {
-        const time = performance.now()
-        driftX = Math.sin(time / 3000) * 7
-        driftY = Math.cos(time / 3600) * 6
-      }
+      // Keep desktop fog atmosphere stable: no continuous drifting motion.
+      const driftX = 0
+      const driftY = 0
 
       if (envFogRef.current) {
-        envFogRef.current.style.transform = `translate3d(${dx * -10 * active}px, ${dy * -7 * active}px, 0)`
+        envFogRef.current.style.transform = mobileMode
+          ? "translate3d(0px, 0px, 0)"
+          : `translate3d(${dx * -2.8 * active}px, ${dy * -2.2 * active}px, 0)`
       }
       if (midFogRef.current) {
-        midFogRef.current.style.transform = `translate3d(${dx * -18 * active}px, ${dy * -14 * active}px, 0)`
+        midFogRef.current.style.transform = mobileMode
+          ? "translate3d(0px, 0px, 0)"
+          : `translate3d(${dx * -4.2 * active}px, ${dy * -3.1 * active}px, 0)`
       }
       if (floatFogRef.current) {
-        const floatX = dx * -24 * active + driftX
-        const floatY = dy * -18 * active + driftY
-        floatFogRef.current.style.transform = `translate3d(${floatX}px, ${floatY}px, 0)`
+        if (mobileMode) {
+          floatFogRef.current.style.transform = "translate3d(0px, 0px, 0)"
+        } else {
+          const floatX = dx * -5.4 * active + driftX
+          const floatY = dy * -4.2 * active + driftY
+          floatFogRef.current.style.transform = `translate3d(${floatX}px, ${floatY}px, 0)`
+        }
       }
 
-      if (maskDirtyRef.current) {
+      if (mobileMode) {
+        const p = mobileClearProgressRef.current
+        if (envFogRef.current) envFogRef.current.style.opacity = `${0.92 - p * 0.78}`
+        if (midFogRef.current) midFogRef.current.style.opacity = `${0.86 - p * 0.78}`
+        if (floatFogRef.current) floatFogRef.current.style.opacity = `${0.20 - p * 0.16}`
+      }
+
+      if (maskDirtyRef.current && performance.now() - lastMaskCommitAtRef.current > 96) {
+        lastMaskCommitAtRef.current = performance.now()
         maskDirtyRef.current = false
         commitMasks()
       }
@@ -199,11 +219,24 @@ export function HeroSection() {
 
     updateHeroRect()
     window.addEventListener("resize", updateHeroRect)
+    const handleScrollForMobileClear = () => {
+      if (!containerRef.current) return
+      if (!isMobileScrollModeRef.current) return
+      const rect = containerRef.current.getBoundingClientRect()
+      const vh = window.innerHeight || 1
+      const raw = (-rect.top + vh * 0.18) / (Math.max(1, rect.height) * 0.88)
+      const progress = clamp01(raw)
+      // Monotonic clear state on mobile: never restore to dense fog.
+      mobileClearProgressRef.current = Math.max(mobileClearProgressRef.current, progress)
+    }
+    window.addEventListener("scroll", handleScrollForMobileClear, { passive: true })
+    handleScrollForMobileClear()
     rafId = requestAnimationFrame(tick)
 
     return () => {
       cancelAnimationFrame(rafId)
       window.removeEventListener("resize", updateHeroRect)
+      window.removeEventListener("scroll", handleScrollForMobileClear)
     }
   }, [])
 
@@ -228,19 +261,19 @@ export function HeroSection() {
 
       // Larger spacing on touch reduces heavy work and avoids degrading scroll.
       const stampSpacingBase = isTouch
-        ? Math.max(26, Math.min(rect.width, rect.height) * 0.035)
-        : Math.max(14, Math.min(rect.width, rect.height) * 0.02)
+        ? Math.max(30, Math.min(rect.width, rect.height) * 0.04)
+        : Math.max(13, Math.min(rect.width, rect.height) * 0.016)
 
       const stampSpacing = Math.max(10, stampSpacingBase)
 
-      const radiusBase = Math.max(150, Math.min(rect.width, rect.height) * 0.26)
-      const envRadius = radiusBase * (isTouch ? 1.00 : 1.02)
-      const midRadius = radiusBase * (isTouch ? 1.16 : 1.22)
-      const floatRadius = radiusBase * (isTouch ? 0.95 : 0.92)
+      const radiusBase = Math.max(156, Math.min(rect.width, rect.height) * 0.265)
+      const envRadius = radiusBase * (isTouch ? 1.02 : 1.04)
+      const midRadius = radiusBase * (isTouch ? 1.18 : 1.24)
+      const floatRadius = radiusBase * (isTouch ? 0.94 : 0.92)
 
-      const centerStrengthEnv = isTouch ? 0.92 : 0.94
-      const centerStrengthMid = isTouch ? 0.86 : 0.90
-      const centerStrengthFloat = isTouch ? 0.66 : 0.72
+      const centerStrengthEnv = isTouch ? 0.8 : 0.78
+      const centerStrengthMid = isTouch ? 0.74 : 0.72
+      const centerStrengthFloat = isTouch ? 0.52 : 0.5
 
       const eraseAt = (
         ctx: CanvasRenderingContext2D,
@@ -260,9 +293,22 @@ export function HeroSection() {
 
         const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
         g.addColorStop(0, `rgba(0,0,0,${centerStrength})`)
+        g.addColorStop(0.18, `rgba(0,0,0,${centerStrength * 0.78})`)
         g.addColorStop(0.42, `rgba(0,0,0,${centerStrength * 0.5})`)
+        g.addColorStop(0.68, `rgba(0,0,0,${centerStrength * 0.24})`)
+        g.addColorStop(0.88, `rgba(0,0,0,${centerStrength * 0.08})`)
         g.addColorStop(1, `rgba(0,0,0,0)`)
         ctx.fillStyle = g
+        ctx.fill()
+
+        // Add a very soft outer feather to avoid visible seam rings.
+        const gSoft = ctx.createRadialGradient(cx, cy, r * 0.36, cx, cy, r * 1.42)
+        gSoft.addColorStop(0, `rgba(0,0,0,${centerStrength * 0.12})`)
+        gSoft.addColorStop(1, "rgba(0,0,0,0)")
+        ctx.fillStyle = gSoft
+        ctx.beginPath()
+        ctx.arc(cx, cy, r * 1.42, 0, Math.PI * 2)
+        ctx.closePath()
         ctx.fill()
 
         ctx.globalCompositeOperation = "source-over"
@@ -309,6 +355,7 @@ export function HeroSection() {
   )
 
   const handleHeroMouseEnter = useCallback((e: any) => {
+    if (isMobileScrollModeRef.current) return
     const pt = e?.pointerType
     // Only enable cursor-local / stamp reveal for fine pointers (mouse/pen).
     if (pt !== "mouse" && pt !== "pen") return
@@ -317,6 +364,7 @@ export function HeroSection() {
   }, [])
 
   const handleHeroMouseLeave = useCallback((e: any) => {
+    if (isMobileScrollModeRef.current) return
     const pt = e?.pointerType
     if (pt !== "mouse" && pt !== "pen") return
     setIsHoveringHero(false)
@@ -325,6 +373,7 @@ export function HeroSection() {
   }, [])
 
   const handleHeroMouseMove = useCallback((e: any) => {
+    if (isMobileScrollModeRef.current) return
     if (!containerRef.current) return
     if (!isHoveringHeroRef.current) return
     const pt = e?.pointerType
@@ -352,6 +401,7 @@ export function HeroSection() {
   }
 
   const handleHeroTouchStart = useCallback((e: any) => {
+    if (isMobileScrollModeRef.current) return
     if (!containerRef.current) return
     const pt = e?.touches?.[0]
     if (!pt) return
@@ -367,6 +417,7 @@ export function HeroSection() {
   }, [stampAtPoint])
 
   const handleHeroTouchMove = useCallback((e: any) => {
+    if (isMobileScrollModeRef.current) return
     if (!containerRef.current) return
     if (!isTouchInteractingRef.current) return
 
@@ -646,7 +697,7 @@ export function HeroSection() {
             >
               <Button
                 size="lg"
-                className="gap-2.5 border-2 border-emerald-800 bg-white/60 px-8 py-6 text-base font-semibold text-emerald-950 transition-all hover:border-[#C7FF3A] hover:bg-[#F3FFD2]"
+                className="border-2 border-emerald-800 bg-white/60 px-8 py-6 text-base font-semibold text-emerald-950 transition-all hover:border-[#C7FF3A] hover:bg-[#F3FFD2]"
                 asChild
               >
                 <Link href="/about">認識鄉育</Link>
@@ -664,7 +715,7 @@ export function HeroSection() {
         style={{
           zIndex: 30,
           opacity: 0.92,
-          filter: "blur(30px)",
+          filter: "blur(24px)",
           willChange: "transform, -webkit-mask-image, mask-image",
           background: `
             linear-gradient(180deg,
@@ -693,7 +744,7 @@ export function HeroSection() {
         style={{
           zIndex: 31,
           opacity: 0.86,
-          filter: "blur(20px)",
+          filter: "blur(16px)",
           willChange: "transform, -webkit-mask-image, mask-image",
           background: `
             radial-gradient(ellipse 78% 58% at 50% 45%,
@@ -718,8 +769,8 @@ export function HeroSection() {
         className="pointer-events-none absolute inset-0"
         style={{
           zIndex: 32,
-          opacity: 0.24,
-          filter: "blur(48px)",
+          opacity: 0.2,
+          filter: "blur(34px)",
           willChange: "transform, -webkit-mask-image, mask-image",
           background: `
             radial-gradient(ellipse 38% 28% at 18% 35%,

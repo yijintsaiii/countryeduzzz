@@ -132,20 +132,20 @@ function JourneyNode({
   return (
     <motion.div
       ref={ref}
-      className={`relative flex items-center gap-6 ${index % 2 === 0 ? 'flex-row' : 'flex-row-reverse'} md:gap-12`}
+      className={`relative flex flex-col items-center gap-4 md:gap-12 ${index % 2 === 0 ? 'md:flex-row' : 'md:flex-row-reverse'}`}
       initial={{ opacity: 0, x: index % 2 === 0 ? -50 : 50 }}
       animate={isInView ? { opacity: 1, x: 0 } : {}}
       transition={{ duration: 0.7, delay: 0.1, ease: "easeOut" }}
     >
       {/* Content card - informational only, no click action */}
       <motion.div
-        className={`flex-1 ${index % 2 === 0 ? 'text-right' : 'text-left'}`}
+        className={`order-2 w-full md:order-none md:flex-1 ${index % 2 === 0 ? 'md:text-right' : 'md:text-left'} text-left`}
         whileHover={{ scale: 1.01 }}
         transition={{ type: "spring", stiffness: 300 }}
       >
         <motion.article
-          className={`relative w-full max-w-md rounded-2xl border border-border bg-card/90 p-6 backdrop-blur-sm transition-colors hover:border-primary/20 hover:shadow-[0_18px_34px_-24px_rgba(5,46,22,0.42)] ${
-            index % 2 === 0 ? 'ml-auto' : 'mr-auto'
+          className={`relative w-full max-w-none rounded-2xl border border-border bg-card/90 p-5 backdrop-blur-sm transition-colors hover:border-primary/20 hover:shadow-[0_18px_34px_-24px_rgba(5,46,22,0.42)] md:max-w-md md:p-6 ${
+            index % 2 === 0 ? 'md:ml-auto' : 'md:mr-auto'
           }`}
           whileHover={{
             y: -2,
@@ -159,7 +159,7 @@ function JourneyNode({
             }`}
             aria-hidden="true"
           />
-          <div className={`flex items-center gap-3 ${index % 2 === 0 ? 'flex-row-reverse' : ''}`}>
+          <div className={`flex items-center gap-3 ${index % 2 === 0 ? 'md:flex-row-reverse' : ''}`}>
             <span 
               className="rounded-sm bg-[#EFFFBE]/70 px-2 py-1 text-xs font-semibold uppercase tracking-wider"
               style={{ color: node.iconColor }}
@@ -167,10 +167,10 @@ function JourneyNode({
               {node.subtitle}
             </span>
           </div>
-          <h3 className={`mt-2 text-2xl font-bold text-foreground ${index % 2 === 0 ? 'text-right' : ''}`}>
+          <h3 className={`mt-2 text-2xl font-bold text-foreground ${index % 2 === 0 ? 'md:text-right' : ''}`}>
             {node.title}
           </h3>
-          <p className={`mt-2 text-muted-foreground leading-relaxed ${index % 2 === 0 ? 'text-right' : ''}`}>
+          <p className={`mt-2 leading-relaxed text-muted-foreground ${index % 2 === 0 ? 'md:text-right' : ''}`}>
             {node.description}
           </p>
         </motion.article>
@@ -178,7 +178,7 @@ function JourneyNode({
 
       {/* Center node */}
       <motion.div
-        className="relative z-10 flex h-16 w-16 shrink-0 items-center justify-center md:h-20 md:w-20"
+        className="relative z-10 order-1 mt-1 flex h-12 w-12 shrink-0 items-center justify-center md:order-none md:mt-0 md:h-20 md:w-20"
         whileHover={{ scale: 1.15 }}
         transition={{ type: "spring", stiffness: 400 }}
       >
@@ -199,7 +199,7 @@ function JourneyNode({
         
         {/* Node circle */}
         <motion.div
-          className="relative flex h-14 w-14 items-center justify-center rounded-full shadow-lg md:h-16 md:w-16"
+          className="relative flex h-10 w-10 items-center justify-center rounded-full shadow-lg md:h-16 md:w-16"
           style={{ 
             backgroundColor: node.bgColor,
             boxShadow: `0 8px 30px -5px ${node.glowColor}`
@@ -213,7 +213,7 @@ function JourneyNode({
       </motion.div>
 
       {/* Empty spacer for alignment */}
-      <div className="flex-1" />
+      <div className="hidden md:block md:flex-1" />
     </motion.div>
   )
 }
