@@ -113,7 +113,7 @@ export function CTASection() {
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeDasharray="6 10"
-                animate={{ strokeDashoffset: [0, -42], opacity: [0.32, 0.54, 0.32] }}
+                animate={{ strokeDashoffset: [0, -52], opacity: [0.3, 0.56, 0.3] }}
                 transition={{ duration: 13, repeat: Infinity, ease: "linear" }}
                 className="transition-opacity duration-500 group-hover:opacity-100"
               />
@@ -142,7 +142,7 @@ export function CTASection() {
               >
                 <Sparkles className="h-4 w-4" />
               </motion.span>
-              <span>成為改變的一部分</span>
+              <span>從行動開始，看見更多可能</span>
             </motion.div>
 
             {/* Headline */}
@@ -153,7 +153,7 @@ export function CTASection() {
               transition={{ duration: 0.7, delay: 0.4 }}
               style={{ textShadow: '0 3px 30px rgba(0,0,0,0.15)' }}
             >
-              相信每個青年都值得被好好陪伴
+              先出發，方向會在行動中慢慢清楚
             </motion.h2>
 
             {/* Subheadline */}
@@ -164,8 +164,7 @@ export function CTASection() {
               animate={isInView ? { opacity: 1, y: 0 } : {}}
               transition={{ duration: 0.7, delay: 0.5 }}
             >
-              你可以報名課程、成為企業夥伴、或是捐款支持——
-              每一種參與，都是在為青年的未來撐開更多可能。
+              比起等待最正確的答案，我們更相信：青年需要的是開始嘗試、持續調整、為自己導航的能力。每一種參與，都是把可能性真正展開的一步。
             </motion.p>
 
             {/* CTA Buttons */}

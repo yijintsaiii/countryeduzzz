@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import { Noto_Sans_TC, Inter } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
+import { GlobalCursorLayer } from '@/components/cursor/global-cursor-layer'
 
 const notoSansTC = Noto_Sans_TC({ 
   subsets: ["latin"],
@@ -59,6 +60,7 @@ export default function RootLayout({
   return (
     <html lang="zh-TW">
       <body className={`${notoSansTC.variable} ${inter.variable} font-sans antialiased`}>
+        <GlobalCursorLayer />
         {children}
         <Analytics />
       </body>

@@ -8,7 +8,7 @@ import { GraduationCap, Building2, Heart, School, ArrowRight } from "lucide-reac
 const audiences = [
   {
     icon: GraduationCap,
-    title: "我是大學生",
+    title: "大學生",
     description: "對未來感到迷惘？鄉育陪你從認識自己開始，一步步找到方向。",
     href: "/for/students",
     cta: "了解課程",
@@ -17,7 +17,7 @@ const audiences = [
   },
   {
     icon: Building2,
-    title: "我是企業",
+    title: "企業夥伴",
     description: "尋找有自我覺察力、願意成長的年輕人才？和我們合作。",
     href: "/for/companies",
     cta: "企業合作",
@@ -26,7 +26,7 @@ const audiences = [
   },
   {
     icon: Heart,
-    title: "我想支持",
+    title: "捐款者",
     description: "讓更多青年有機會探索自己、找到方向，你的支持是改變的起點。",
     href: "/for/donors",
     cta: "捐款支持",
@@ -35,7 +35,7 @@ const audiences = [
   },
   {
     icon: School,
-    title: "我是學校",
+    title: "大學合作",
     description: "將職涯探索課程導入校園，為學生提供系統化的成長支持。",
     href: "/for/universities",
     cta: "校園合作",
@@ -107,7 +107,7 @@ export function AudienceCards() {
   const isInView = useInView(ref, { once: true, margin: "-100px" })
 
   return (
-    <section id="audience" className="group relative overflow-hidden py-20 lg:py-28 bg-background">
+    <section id="audience" className="relative overflow-hidden py-20 lg:py-28 bg-background">
       {/* Subtle organic pattern */}
       <div className="absolute inset-0 opacity-40">
         <svg className="absolute top-0 left-0 w-full h-24" viewBox="0 0 1200 100" preserveAspectRatio="none">
@@ -137,9 +137,8 @@ export function AudienceCards() {
             strokeWidth="2"
             strokeLinecap="round"
             strokeDasharray="6 12"
-            animate={{ strokeDashoffset: [0, -40] }}
+            animate={{ strokeDashoffset: [0, -48], opacity: [0.66, 0.78, 0.66] }}
             transition={{ duration: 16, repeat: Infinity, ease: "linear" }}
-            className="opacity-75 transition-opacity duration-500 group-hover:opacity-100"
           />
           <motion.circle
             cx="920"

@@ -17,20 +17,20 @@ const donationTiers = [
     impact: "提供 1 位學生 2 小時的探索體驗",
   },
   {
-    amount: 1500,
+    amount: 1000,
     title: "成長夥伴",
     description: "支持一位學生完成完整的階段課程",
     impact: "陪伴 1 位學生走過 6 週的成長旅程",
     popular: true,
   },
   {
-    amount: 5000,
+    amount: 800,
     title: "選擇力推手",
     description: "支持一位學生完成整年度的學習計畫",
     impact: "為 1 位學生提供完整的三階段培育",
   },
   {
-    amount: 15000,
+    amount: 2000,
     title: "未來領航者",
     description: "支持一個班級的職涯探索課程",
     impact: "幫助 30 位學生開啟職涯視野",
@@ -107,8 +107,18 @@ export default function DonatePage() {
                   </CardHeader>
                   <CardContent className="text-center">
                     <p className="mb-4 text-sm text-muted-foreground">{tier.impact}</p>
-                    <Button className={`w-full transition-all ${tier.popular ? "hover:ring-2 hover:ring-[#C7FF3A]/40" : "hover:border-[#C7FF3A] hover:bg-[#EFFFBE]/50"}`} variant={tier.popular ? "default" : "outline"}>
-                      立即捐款
+                    <Button
+                      className={`w-full transition-all ${tier.popular ? "hover:ring-2 hover:ring-[#C7FF3A]/40" : "hover:border-[#C7FF3A] hover:bg-[#EFFFBE]/50"}`}
+                      variant={tier.popular ? "default" : "outline"}
+                      asChild
+                    >
+                      <a
+                        href="https://countryedu.oen.tw/"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        立即捐款
+                      </a>
                     </Button>
                   </CardContent>
                 </Card>

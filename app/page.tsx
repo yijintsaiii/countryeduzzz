@@ -4,7 +4,6 @@ import { HeroSection } from "@/components/home/hero-section"
 import { JourneyPath } from "@/components/home/journey-path"
 import { ImpactStats } from "@/components/home/impact-stats"
 import { TestimonialsSection } from "@/components/home/testimonials-section"
-import { PartnersSection } from "@/components/home/partners-section"
 import { AudienceCards } from "@/components/home/audience-cards"
 import { CTASection } from "@/components/home/cta-section"
 
@@ -22,7 +21,6 @@ export default function HomePage() {
         {/* 影響力與社會證明 */}
         <ImpactStats />
         <TestimonialsSection />
-        <PartnersSection />
         
         {/* 用戶分流與行動呼籲 */}
         <AudienceCards />

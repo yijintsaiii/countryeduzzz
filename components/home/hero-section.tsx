@@ -1,9 +1,17 @@
 "use client"
 
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useId } from "react"
 import { motion } from "framer-motion"
 
-// Hero Section with persistent cursor-based fog reveal animation
+/**
+ * 主旅程路徑（與 L3 描邊／動畫原點共用）
+ * - C¹ 銜接；迴圈略上移，右側最後一段控制點拉遠以接近「圓弧」掃掠
+ * - 仍為：繞一圈後，再以單一 cubic 大弧接至終點
+ */
+const HERO_JOURNEY_PATH =
+  "M -40 820 C 120 680 160 480 340 460 C 520 440 480 260 280 290 C 100 320 140 120 420 150 C 700 180 620 420 520 620 C 420 820 720 860 940 560 C 1160 260 1040 280 920 340 C 800 400 920 440 1000 380 C 1080 320 1200 255 1280 292"
+
+// Hero Section：單層 canvas 霧 + 指標路徑撥開（無 mask-image / toDataURL，避免閃爍）
 export function HeroSection() {
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -17,35 +25,19 @@ export function HeroSection() {
   const isTouchInteractingRef = useRef(false)
   const touchIdRef = useRef<number | null>(null)
 
-  // Raw cursor position (relative to the hero)
+  // Raw cursor position (relative to the hero); optional future use
   const mousePosition = useRef({ x: 0, y: 0 })
-  // Smoothed cursor position (inertia)
-  const smoothedMousePosition = useRef({ x: 0, y: 0 })
 
   const heroRectRef = useRef({ left: 0, top: 0, width: 1, height: 1 })
 
-  const envFogRef = useRef<HTMLDivElement>(null)
-  const midFogRef = useRef<HTMLDivElement>(null)
-  const floatFogRef = useRef<HTMLDivElement>(null)
+  /** 單層霧：直接畫在 canvas 上並以 destination-out 撥開，不使用 mask-image / toDataURL，避免閃爍 */
+  const fogCanvasRef = useRef<HTMLCanvasElement>(null)
+  const fogCtxRef = useRef<CanvasRenderingContext2D | null>(null)
 
-  // Persistent reveal masks (canvas-based, erased only once).
-  const envMaskCanvasRef = useRef<HTMLCanvasElement>(null)
-  const midMaskCanvasRef = useRef<HTMLCanvasElement>(null)
-  const floatMaskCanvasRef = useRef<HTMLCanvasElement>(null)
-
-  const envMaskCtxRef = useRef<CanvasRenderingContext2D | null>(null)
-  const midMaskCtxRef = useRef<CanvasRenderingContext2D | null>(null)
-  const floatMaskCtxRef = useRef<CanvasRenderingContext2D | null>(null)
-
-  const maskScale = 0.42
   const lastStampRef = useRef<{ x: number; y: number } | null>(null)
   const lastPointerEventAtRef = useRef(0)
-  const lastMaskCommitAtRef = useRef(0)
   const isMobileScrollModeRef = useRef(false)
   const mobileClearProgressRef = useRef(0)
-  const cursorCoreRef = useRef<HTMLDivElement>(null)
-  const cursorRingRef = useRef<HTMLDivElement>(null)
-  const cursorInteractiveRef = useRef(false)
 
   // For "almost clear" end-state (still persistent, never recovers).
   const pathEnergyRef = useRef(0)
@@ -53,8 +45,11 @@ export function HeroSection() {
   const clearedAmountRef = useRef(0)
   const clearEnergyTargetRef = useRef(3200)
 
-  // Throttle heavy `toDataURL()` mask updates.
-  const maskDirtyRef = useRef(false)
+  /** 主路徑：供 getPointAtLength 動畫原點 */
+  const journeyPathRef = useRef<SVGPathElement>(null)
+  const journeyDotRef = useRef<SVGCircleElement>(null)
+  const journeyRingRef = useRef<SVGCircleElement>(null)
+  const journeyRing2Ref = useRef<SVGCircleElement>(null)
 
   const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
 
@@ -75,57 +70,102 @@ export function HeroSection() {
   }, [])
 
   useEffect(() => {
-    let rafId = 0
-
     const clamp01 = (v: number) => Math.max(0, Math.min(1, v))
-    const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 
-    const commitMasks = () => {
-      if (!envFogRef.current || !midFogRef.current || !floatFogRef.current) return
-      const envCanvas = envMaskCanvasRef.current
-      const midCanvas = midMaskCanvasRef.current
-      const floatCanvas = floatMaskCanvasRef.current
-      if (!envCanvas || !midCanvas || !floatCanvas) return
-
-      // PNG alpha is used by CSS mask-image.
-      const envUrl = envCanvas.toDataURL("image/png")
-      const midUrl = midCanvas.toDataURL("image/png")
-      const floatUrl = floatCanvas.toDataURL("image/png")
-
-      const applyMask = (el: HTMLDivElement, url: string) => {
-        el.style.webkitMaskImage = `url(${url})`
-        el.style.maskImage = `url(${url})`
-        el.style.webkitMaskRepeat = "no-repeat"
-        el.style.maskRepeat = "no-repeat"
-        el.style.webkitMaskSize = "100% 100%"
-        el.style.maskSize = "100% 100%"
-      }
-
-      applyMask(envFogRef.current, envUrl)
-      applyMask(midFogRef.current, midUrl)
-      applyMask(floatFogRef.current, floatUrl)
-    }
-
-    const initMaskCanvas = (
-      canvas: HTMLCanvasElement | null,
-      ctxRef: { current: CanvasRenderingContext2D | null }
-    ) => {
-      if (!canvas) return
-      const { width, height } = heroRectRef.current
-      const w = Math.max(1, Math.floor(width * maskScale))
-      const h = Math.max(1, Math.floor(height * maskScale))
-      canvas.width = w
-      canvas.height = h
-      const ctx = canvas.getContext("2d")
-      if (!ctx) return
-      ctxRef.current = ctx
-      ctx.imageSmoothingEnabled = true
-
-      // White/opaque mask => fog fully visible.
+    /** 合併原三層霧的視覺權重在單一 bitmap（再由 CSS blur 柔化邊緣） */
+    const drawFogBase = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
       ctx.globalCompositeOperation = "source-over"
       ctx.clearRect(0, 0, w, h)
-      ctx.fillStyle = "rgba(255,255,255,1)"
+      ctx.imageSmoothingEnabled = true
+
+      /** 互動霧：帶極淡 mint / brume 色偏，與背景色場一致 */
+      const lg = ctx.createLinearGradient(0, 0, 0, h)
+      lg.addColorStop(0, "rgba(248, 252, 250, 0.78)")
+      lg.addColorStop(0.3, "rgba(232, 248, 242, 0.7)")
+      lg.addColorStop(0.55, "rgba(220, 244, 236, 0.56)")
+      lg.addColorStop(0.78, "rgba(210, 240, 232, 0.4)")
+      lg.addColorStop(1, "rgba(200, 236, 228, 0.28)")
+      ctx.globalAlpha = 1
+      ctx.fillStyle = lg
       ctx.fillRect(0, 0, w, h)
+
+      const r1 = ctx.createRadialGradient(w * 0.35, h * 0.25, 0, w * 0.35, h * 0.25, w * 0.72)
+      r1.addColorStop(0, "rgba(255,255,255,0.45)")
+      r1.addColorStop(0.55, "rgba(255,255,255,0)")
+      ctx.fillStyle = r1
+      ctx.fillRect(0, 0, w, h)
+
+      const r2 = ctx.createRadialGradient(w * 0.75, h * 0.65, 0, w * 0.75, h * 0.65, w * 0.68)
+      r2.addColorStop(0, "rgba(255,255,255,0.32)")
+      r2.addColorStop(0.6, "rgba(255,255,255,0)")
+      ctx.fillStyle = r2
+      ctx.fillRect(0, 0, w, h)
+
+      const r3 = ctx.createRadialGradient(w * 0.5, h * 0.45, 0, w * 0.5, h * 0.45, w * 0.48)
+      r3.addColorStop(0, "rgba(255, 255, 255, 0.98)")
+      r3.addColorStop(0.18, "rgba(253, 254, 254, 0.92)")
+      r3.addColorStop(0.36, "rgba(250, 252, 252, 0.76)")
+      r3.addColorStop(0.58, "rgba(248, 251, 250, 0.46)")
+      r3.addColorStop(0.78, "rgba(245, 250, 248, 0.20)")
+      r3.addColorStop(0.96, "rgba(245, 250, 248, 0)")
+      ctx.globalAlpha = 0.94
+      ctx.fillStyle = r3
+      ctx.fillRect(0, 0, w, h)
+
+      ctx.globalAlpha = 0.32
+      const r4 = ctx.createRadialGradient(w * 0.5, h * 0.62, 0, w * 0.5, h * 0.62, w * 0.85)
+      r4.addColorStop(0, "rgba(255,255,255,0.28)")
+      r4.addColorStop(0.7, "rgba(255,255,255,0)")
+      ctx.fillStyle = r4
+      ctx.fillRect(0, 0, w, h)
+
+      const floats: [number, number, number][] = [
+        [0.18, 0.35, 0.22],
+        [0.45, 0.6, 0.28],
+        [0.78, 0.4, 0.26],
+        [0.6, 0.8, 0.32],
+      ]
+      ctx.globalAlpha = 0.45
+      for (const [fx, fy, fr] of floats) {
+        const g = ctx.createRadialGradient(w * fx, h * fy, 0, w * fx, h * fy, w * fr)
+        g.addColorStop(0, "rgba(255,255,255,0.52)")
+        g.addColorStop(0.62, "rgba(255,255,255,0)")
+        ctx.fillStyle = g
+        ctx.fillRect(0, 0, w, h)
+      }
+      ctx.globalAlpha = 1
+    }
+
+    const syncFogCanvasOpacity = () => {
+      const el = fogCanvasRef.current
+      if (!el) return
+      if (isMobileScrollModeRef.current) {
+        const p = mobileClearProgressRef.current
+        el.style.opacity = `${0.92 - p * 0.82}`
+      } else {
+        el.style.opacity = "0.92"
+      }
+    }
+
+    const initFogCanvas = () => {
+      const canvas = fogCanvasRef.current
+      if (!canvas) return
+      const { width: cssW, height: cssH } = heroRectRef.current
+      const w = Math.max(1, cssW)
+      const h = Math.max(1, cssH)
+      const dpr = Math.min(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1, 2)
+
+      canvas.width = Math.floor(w * dpr)
+      canvas.height = Math.floor(h * dpr)
+      canvas.style.width = `${w}px`
+      canvas.style.height = `${h}px`
+
+      const ctx = canvas.getContext("2d", { alpha: true })
+      if (!ctx) return
+      fogCtxRef.current = ctx
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      drawFogBase(ctx, w, h)
+      syncFogCanvasOpacity()
     }
 
     const updateHeroRect = () => {
@@ -138,103 +178,21 @@ export function HeroSection() {
         height: Math.max(1, r.height),
       }
 
-      // Initialize cursor positions at center so transforms are stable.
       mousePosition.current = {
         x: heroRectRef.current.width / 2,
         y: heroRectRef.current.height / 2,
       }
-      smoothedMousePosition.current = { ...mousePosition.current }
 
-      // Mobile/tablet uses scroll-to-clear instead of touch-path reveal.
       isMobileScrollModeRef.current = window.matchMedia("(max-width: 1024px), (pointer: coarse)").matches
-
-      // If user resizes, reset masks (rare), but never "restore" during a session.
-      initMaskCanvas(envMaskCanvasRef.current, envMaskCtxRef)
-      initMaskCanvas(midMaskCanvasRef.current, midMaskCtxRef)
-      initMaskCanvas(floatMaskCanvasRef.current, floatMaskCtxRef)
 
       lastStampRef.current = null
       pathEnergyRef.current = 0
       clearedTargetRef.current = 0
       clearedAmountRef.current = 0
-      maskDirtyRef.current = true
+
+      initFogCanvas()
     }
 
-    const tick = () => {
-      const rect = heroRectRef.current
-      const s = smoothedMousePosition.current
-      const t = mousePosition.current
-      const mobileMode = isMobileScrollModeRef.current
-
-      // Inertia-like smoothing for natural motion.
-      s.x += (t.x - s.x) * 0.14
-      s.y += (t.y - s.y) * 0.14
-
-      const dx = (s.x / rect.width - 0.5) * 2
-      const dy = (s.y / rect.height - 0.5) * 2
-
-      const hoverLocal = isHoveringHeroRef.current ? 1 : 0
-      const active = hoverLocal
-
-      // Subtle displacement to make interaction feel alive (mask is the main reveal).
-      // Keep desktop fog atmosphere stable: no continuous drifting motion.
-      const driftX = 0
-      const driftY = 0
-
-      if (envFogRef.current) {
-        envFogRef.current.style.transform = mobileMode
-          ? "translate3d(0px, 0px, 0)"
-          : `translate3d(${dx * -2.8 * active}px, ${dy * -2.2 * active}px, 0)`
-      }
-      if (midFogRef.current) {
-        midFogRef.current.style.transform = mobileMode
-          ? "translate3d(0px, 0px, 0)"
-          : `translate3d(${dx * -4.2 * active}px, ${dy * -3.1 * active}px, 0)`
-      }
-      if (floatFogRef.current) {
-        if (mobileMode) {
-          floatFogRef.current.style.transform = "translate3d(0px, 0px, 0)"
-        } else {
-          const floatX = dx * -5.4 * active + driftX
-          const floatY = dy * -4.2 * active + driftY
-          floatFogRef.current.style.transform = `translate3d(${floatX}px, ${floatY}px, 0)`
-        }
-      }
-
-      if (mobileMode) {
-        const p = mobileClearProgressRef.current
-        if (envFogRef.current) envFogRef.current.style.opacity = `${0.92 - p * 0.78}`
-        if (midFogRef.current) midFogRef.current.style.opacity = `${0.86 - p * 0.78}`
-        if (floatFogRef.current) floatFogRef.current.style.opacity = `${0.20 - p * 0.16}`
-      }
-
-      // Desktop-only custom cursor in Hero (stable, subtle).
-      if (!mobileMode && cursorCoreRef.current && cursorRingRef.current) {
-        const cx = s.x
-        const cy = s.y
-        const isNearRoute = Math.abs(dx) < 0.16
-        const isInteractive = cursorInteractiveRef.current
-
-        cursorCoreRef.current.style.transform = `translate3d(${cx}px, ${cy}px, 0) translate(-50%, -50%) scale(${isInteractive ? 1.25 : 1})`
-        cursorCoreRef.current.style.opacity = isHoveringHeroRef.current ? "0.95" : "0"
-
-        const ringScale = isInteractive ? 1.42 : isNearRoute ? 1.16 : 1
-        const ringOpacity = isInteractive ? 0.58 : isNearRoute ? 0.42 : 0.28
-        cursorRingRef.current.style.transform = `translate3d(${cx}px, ${cy}px, 0) translate(-50%, -50%) scale(${ringScale})`
-        cursorRingRef.current.style.opacity = isHoveringHeroRef.current ? `${ringOpacity}` : "0"
-      }
-
-      if (maskDirtyRef.current && performance.now() - lastMaskCommitAtRef.current > 96) {
-        lastMaskCommitAtRef.current = performance.now()
-        maskDirtyRef.current = false
-        commitMasks()
-      }
-
-      rafId = requestAnimationFrame(tick)
-    }
-
-    updateHeroRect()
-    window.addEventListener("resize", updateHeroRect)
     const handleScrollForMobileClear = () => {
       if (!containerRef.current) return
       if (!isMobileScrollModeRef.current) return
@@ -242,15 +200,16 @@ export function HeroSection() {
       const vh = window.innerHeight || 1
       const raw = (-rect.top + vh * 0.18) / (Math.max(1, rect.height) * 0.88)
       const progress = clamp01(raw)
-      // Monotonic clear state on mobile: never restore to dense fog.
       mobileClearProgressRef.current = Math.max(mobileClearProgressRef.current, progress)
+      syncFogCanvasOpacity()
     }
+
+    updateHeroRect()
+    window.addEventListener("resize", updateHeroRect)
     window.addEventListener("scroll", handleScrollForMobileClear, { passive: true })
     handleScrollForMobileClear()
-    rafId = requestAnimationFrame(tick)
 
     return () => {
-      cancelAnimationFrame(rafId)
       window.removeEventListener("resize", updateHeroRect)
       window.removeEventListener("scroll", handleScrollForMobileClear)
     }
@@ -263,14 +222,11 @@ export function HeroSection() {
   const stampAtPoint = useCallback(
     (x: number, y: number, mode: "mouse" | "touch") => {
       const rect = heroRectRef.current
-      if (!envMaskCtxRef.current || !midMaskCtxRef.current || !floatMaskCtxRef.current) return
+      const ctx = fogCtxRef.current
+      if (!ctx) return
 
       // Only stamp within a central zone on touch.
       if (mode === "touch" && !inCentralZone(x, y)) return
-
-      const envCtx = envMaskCtxRef.current
-      const midCtx = midMaskCtxRef.current
-      const floatCtx = floatMaskCtxRef.current
 
       const last = lastStampRef.current
       const isTouch = mode === "touch"
@@ -283,24 +239,14 @@ export function HeroSection() {
       const stampSpacing = Math.max(10, stampSpacingBase)
 
       const radiusBase = Math.max(156, Math.min(rect.width, rect.height) * 0.265)
-      const envRadius = radiusBase * (isTouch ? 1.02 : 1.04)
-      const midRadius = radiusBase * (isTouch ? 1.18 : 1.24)
-      const floatRadius = radiusBase * (isTouch ? 0.94 : 0.92)
+      // 單層：取原中層與環境層之間的半徑，一次柔軟撥開
+      const radius = radiusBase * (isTouch ? 1.12 : 1.18)
+      const centerStrength = isTouch ? 0.76 : 0.74
 
-      const centerStrengthEnv = isTouch ? 0.8 : 0.78
-      const centerStrengthMid = isTouch ? 0.74 : 0.72
-      const centerStrengthFloat = isTouch ? 0.52 : 0.5
-
-      const eraseAt = (
-        ctx: CanvasRenderingContext2D,
-        px: number,
-        py: number,
-        radius: number,
-        centerStrength: number
-      ) => {
-        const cx = px * maskScale
-        const cy = py * maskScale
-        const r = radius * maskScale
+      const eraseAt = (px: number, py: number) => {
+        const cx = px
+        const cy = py
+        const r = radius
 
         ctx.globalCompositeOperation = "destination-out"
         ctx.beginPath()
@@ -317,7 +263,6 @@ export function HeroSection() {
         ctx.fillStyle = g
         ctx.fill()
 
-        // Add a very soft outer feather to avoid visible seam rings.
         const gSoft = ctx.createRadialGradient(cx, cy, r * 0.36, cx, cy, r * 1.42)
         gSoft.addColorStop(0, `rgba(0,0,0,${centerStrength * 0.12})`)
         gSoft.addColorStop(1, "rgba(0,0,0,0)")
@@ -331,16 +276,13 @@ export function HeroSection() {
       }
 
       const stamp = (sx: number, sy: number) => {
-        eraseAt(envCtx, sx, sy, envRadius, centerStrengthEnv)
-        eraseAt(midCtx, sx, sy, midRadius, centerStrengthMid)
-        eraseAt(floatCtx, sx, sy, floatRadius, centerStrengthFloat)
+        eraseAt(sx, sy)
       }
 
       // Initial stamp: create an anchor so reveal feels immediate.
       if (!last) {
         lastStampRef.current = { x, y }
         stamp(x, y)
-        maskDirtyRef.current = true
         return
       }
 
@@ -354,10 +296,7 @@ export function HeroSection() {
       }
 
       lastStampRef.current = { x, y }
-      maskDirtyRef.current = true
 
-      // Energy based on path length => drives the "almost clear" end-state.
-      // Note: this never restores fog (monotonic reveal).
       pathEnergyRef.current += dist * (isTouch ? 1.1 : 1.4)
       const target = Math.max(2200, Math.max(rect.width, rect.height) * 3.2)
       clearEnergyTargetRef.current = target
@@ -402,8 +341,6 @@ export function HeroSection() {
     const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left))
     const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top))
     mousePosition.current = { x, y }
-    const target = e?.target as HTMLElement | null
-    cursorInteractiveRef.current = !!target?.closest("a, button, [role='button']")
     stampAtPoint(x, y, "mouse")
   }, [])
 
@@ -448,8 +385,56 @@ export function HeroSection() {
     isTouchInteractingRef.current = false
     touchIdRef.current = null
     lastStampRef.current = null
-    cursorInteractiveRef.current = false
   }, [])
+
+  /** 原點沿主旅程 path 循環移動（layout 後量測；path 長度為 0 時下一幀重試） */
+  useLayoutEffect(() => {
+    let raf = 0
+    let cancelled = false
+    const durationMs = 26000
+    const t0 = performance.now()
+
+    const loop = (now: number) => {
+      if (cancelled) return
+      const path = journeyPathRef.current
+      const dot = journeyDotRef.current
+      const ring = journeyRingRef.current
+      const ring2 = journeyRing2Ref.current
+      if (!path || !dot) {
+        raf = requestAnimationFrame(loop)
+        return
+      }
+      const len = path.getTotalLength()
+      if (len > 0) {
+        const u = (now - t0) / durationMs
+        const progress = u - Math.floor(u)
+        const pt = path.getPointAtLength(progress * len)
+        dot.setAttribute("cx", String(pt.x))
+        dot.setAttribute("cy", String(pt.y))
+        if (ring) {
+          ring.setAttribute("cx", String(pt.x))
+          ring.setAttribute("cy", String(pt.y))
+        }
+        if (ring2) {
+          ring2.setAttribute("cx", String(pt.x))
+          ring2.setAttribute("cy", String(pt.y))
+        }
+      }
+      raf = requestAnimationFrame(loop)
+    }
+    raf = requestAnimationFrame(loop)
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(raf)
+    }
+  }, [])
+
+  const heroBgUid = useId().replace(/:/g, "")
+  /** 多層 grain：底片感 + 細微粒 + 極細高光微粒 */
+  const grainFilmId = `hero-grain-film-${heroBgUid}`
+  const grainFineId = `hero-grain-fine-${heroBgUid}`
+  const grainSparkId = `hero-grain-spark-${heroBgUid}`
+  const grainHiId = `hero-grain-hi-${heroBgUid}`
 
   return (
     <section
@@ -457,8 +442,8 @@ export function HeroSection() {
       className="relative min-h-screen overflow-hidden"
       style={{
         position: "relative",
-        background:
-          "linear-gradient(148deg, oklch(0.2 0.058 154) 0%, oklch(0.175 0.05 156) 36%, oklch(0.162 0.045 158) 68%, oklch(0.19 0.052 155) 100%)",
+        /* 與底層橫向漸層右側收斂色一致 */
+        backgroundColor: "#060f12",
       }}
       onPointerEnter={handleHeroMouseEnter}
       onPointerMove={handleHeroMouseMove}
@@ -468,178 +453,501 @@ export function HeroSection() {
       onTouchEnd={handleHeroTouchEnd}
       onTouchCancel={handleHeroTouchEnd}
     >
-      {/* Desktop custom cursor (Hero-only) */}
-      <div className="pointer-events-none absolute inset-0 z-[55] hidden md:block">
-        <div
-          ref={cursorRingRef}
-          className="absolute h-7 w-7 rounded-full border border-[#cbfd3c]/55 bg-transparent transition-[transform,opacity,border-color] duration-150 ease-out"
-          style={{
-            opacity: 0,
-            boxShadow: "0 0 14px rgba(203,253,60,0.18)",
-          }}
-        />
-        <div
-          ref={cursorCoreRef}
-          className="absolute h-2.5 w-2.5 rounded-full bg-[#cbfd3c] transition-[transform,opacity] duration-100 ease-out"
-          style={{
-            opacity: 0,
-            boxShadow: "0 0 8px rgba(203,253,60,0.42)",
-          }}
-        />
-      </div>
-
-      {/* ── Ambient brand composition (z-0) ──────────────────────────────── */}
+      {/* ── Hero 背景視覺（z-0）：底層橫向色帶 + 星點 + mint-aqua 色場 + grain（不碰互動霧、文案、路徑幾何） ─ */}
       <div className="pointer-events-none absolute inset-0 z-0">
+        {/* L0a 最底：橫向亮檸檬綠 → 橄欖綠 → 深青綠／海軍（參考圖 2 條狀霧面色帶） */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background: `
+              linear-gradient(92deg,
+                #d8ef72 0%,
+                #a8d06a 14%,
+                #6a9a72 38%,
+                #355a52 62%,
+                #142824 82%,
+                #060f12 100%
+              )
+            `,
+          }}
+        />
+        {/* L0a-grain：底層全畫面細噪（強化圖 2 的顆粒／霧面，與上層 L2 疊加） */}
+        <svg
+          className="absolute inset-0 h-full w-full opacity-[0.28] mix-blend-soft-light"
+          aria-hidden
+          viewBox="0 0 1200 900"
+          preserveAspectRatio="none"
+        >
+          <defs>
+            <filter id={`hero-base-grain-${heroBgUid}`} x="0" y="0" width="1200" height="900" filterUnits="userSpaceOnUse">
+              <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="4" stitchTiles="stitch" result="bn" />
+              <feColorMatrix in="bn" type="saturate" values="0" />
+            </filter>
+          </defs>
+          <rect width="1200" height="900" fill="#fff" filter={`url(#hero-base-grain-${heroBgUid})`} opacity={0.95} />
+        </svg>
+        {/* L0a-stars：四芒星點綴（參考圖 1，置於色帶之上、mesh 之下） */}
+        <svg
+          className="absolute inset-0 h-full w-full opacity-[0.55]"
+          aria-hidden
+          viewBox="0 0 1200 900"
+          preserveAspectRatio="xMidYMid slice"
+        >
+          <defs>
+            <filter id={`hero-star-glow-${heroBgUid}`} x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="0.8" result="b" />
+              <feMerge>
+                <feMergeNode in="b" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+          <g fill="rgba(255,255,255,0.88)" filter={`url(#hero-star-glow-${heroBgUid})`}>
+            {/* 四芒星（羅盤星）24×24，中心 (12,12) */}
+            <g transform="translate(180 120) scale(1.1)">
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(420 200) scale(0.45)" opacity={0.7}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(680 160) scale(0.75)" opacity={0.85}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(920 240) scale(0.38)" opacity={0.55}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(280 380) scale(0.55)" opacity={0.65}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(540 320) scale(0.95)" opacity={0.9}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(780 400) scale(0.42)" opacity={0.5}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(150 520) scale(0.5)" opacity={0.6}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(360 580) scale(0.35)" opacity={0.45}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(620 500) scale(0.68)" opacity={0.75}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(900 560) scale(0.4)" opacity={0.5}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(1050 140) scale(0.48)" opacity={0.58}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(240 680) scale(0.52)" opacity={0.62}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(480 720) scale(0.33)" opacity={0.42}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(720 780) scale(0.58)" opacity={0.68}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+            <g transform="translate(980 680) scale(0.44)" opacity={0.52}>
+              <path d="M12 2L14 10L22 12L14 14L12 22L10 14L2 12L10 10Z" transform="translate(-12,-12)" />
+            </g>
+          </g>
+        </svg>
+        {/* L0：mint / aqua / lemonade / chartreuse 霧化 mesh（參考色：#C2F2E4 #35C8B4 #EDF7BE #A4CF4A）— 疊在底層色帶上，略透讓橫向層次保留 */}
+        <div
+          className="absolute inset-0"
+          style={{
+            opacity: 0.88,
+            mixBlendMode: "soft-light" as const,
+            background: `
+              radial-gradient(ellipse 150% 105% at 6% 8%, rgba(237, 247, 190, 0.42) 0%, rgba(194, 242, 228, 0.18) 32%, transparent 58%),
+              radial-gradient(ellipse 145% 100% at 96% 4%, rgba(194, 242, 228, 0.5) 0%, rgba(53, 200, 180, 0.14) 38%, transparent 60%),
+              radial-gradient(ellipse 130% 120% at 92% 92%, rgba(53, 200, 180, 0.22) 0%, rgba(15, 40, 38, 0.06) 48%, transparent 58%),
+              radial-gradient(ellipse 128% 115% at 8% 90%, rgba(164, 207, 74, 0.2) 0%, rgba(53, 200, 180, 0.12) 42%, transparent 56%),
+              radial-gradient(ellipse 100% 82% at 88% 28%, rgba(194, 242, 228, 0.16) 0%, transparent 55%),
+              radial-gradient(ellipse 175% 92% at 50% 100%, rgba(12, 38, 36, 0.38) 0%, rgba(15, 32, 30, 0.12) 42%, transparent 62%),
+              radial-gradient(ellipse 92% 72% at 14% 96%, rgba(10, 42, 40, 0.28) 0%, transparent 54%),
+              radial-gradient(ellipse 92% 72% at 86% 96%, rgba(10, 42, 40, 0.28) 0%, transparent 54%),
+              radial-gradient(ellipse 62% 56% at 48% 42%, rgba(194, 242, 228, 0.12) 0%, transparent 64%),
+              linear-gradient(188deg,
+                oklch(0.38 0.065 168) 0%,
+                oklch(0.32 0.058 172) 22%,
+                oklch(0.28 0.05 178) 48%,
+                oklch(0.24 0.045 185) 72%,
+                oklch(0.22 0.042 192) 100%
+              )
+            `,
+          }}
+        />
+        {/* L0b 毛玻璃「+」光暈：四角皆有類左上光感（強 blur） */}
+        <div
+          className="pointer-events-none absolute inset-0 overflow-hidden"
+          style={{ opacity: 0.92 }}
+        >
+          {/* 左上：主光（與先前一致，blur 略增） */}
+          <div
+            className="absolute -left-[14%] -top-[8%] h-[62%] w-[62%]"
+            style={{
+              filter: "blur(88px)",
+              opacity: 0.52,
+              transform: "rotate(-11deg)",
+            }}
+          >
+            <div
+              className="absolute left-1/2 top-1/2 h-[72%] w-[20%] -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{
+                background:
+                  "linear-gradient(180deg, transparent 0%, rgba(237, 247, 190, 0.55) 40%, rgba(194, 242, 228, 0.42) 100%)",
+                boxShadow: "0 0 90px 48px rgba(164, 207, 74, 0.22)",
+              }}
+            />
+            <div
+              className="absolute left-1/2 top-1/2 h-[22%] w-[76%] -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{
+                background:
+                  "linear-gradient(90deg, transparent 0%, rgba(194, 242, 228, 0.62) 50%, transparent 100%)",
+                boxShadow: "0 0 78px 40px rgba(53, 200, 180, 0.18)",
+              }}
+            />
+          </div>
+          {/* 右上 */}
+          <div
+            className="absolute -right-[10%] -top-[6%] h-[44%] w-[44%]"
+            style={{
+              filter: "blur(76px)",
+              opacity: 0.42,
+              transform: "rotate(9deg)",
+            }}
+          >
+            <div
+              className="absolute left-1/2 top-1/2 h-[70%] w-[21%] -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{
+                background:
+                  "linear-gradient(180deg, transparent 0%, rgba(237, 247, 190, 0.5) 50%, transparent 100%)",
+                boxShadow: "0 0 60px 32px rgba(53, 200, 180, 0.16)",
+              }}
+            />
+            <div
+              className="absolute left-1/2 top-1/2 h-[21%] w-[74%] -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{
+                background:
+                  "linear-gradient(90deg, transparent 0%, rgba(194, 242, 228, 0.62) 50%, transparent 100%)",
+              }}
+            />
+          </div>
+          {/* 左下 */}
+          <div
+            className="absolute -left-[6%] bottom-[2%] h-[42%] w-[42%]"
+            style={{
+              filter: "blur(70px)",
+              opacity: 0.4,
+              transform: "rotate(-8deg)",
+            }}
+          >
+            <div
+              className="absolute left-1/2 top-1/2 h-[69%] w-[22%] -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{
+                background:
+                  "linear-gradient(180deg, transparent 0%, rgba(53, 200, 180, 0.38) 50%, transparent 100%)",
+                boxShadow: "0 0 56px 28px rgba(53, 200, 180, 0.14)",
+              }}
+            />
+            <div
+              className="absolute left-1/2 top-1/2 h-[20%] w-[73%] -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{
+                background:
+                  "linear-gradient(90deg, transparent 0%, rgba(194, 242, 228, 0.45) 50%, transparent 100%)",
+              }}
+            />
+          </div>
+          {/* 右下 */}
+          <div
+            className="absolute -right-[8%] bottom-[4%] h-[38%] w-[38%]"
+            style={{
+              filter: "blur(68px)",
+              opacity: 0.4,
+              transform: "rotate(7deg)",
+            }}
+          >
+            <div
+              className="absolute left-1/2 top-1/2 h-[68%] w-[22%] -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{
+                background:
+                  "linear-gradient(180deg, transparent 0%, rgba(164, 207, 74, 0.32) 50%, transparent 100%)",
+                boxShadow: "0 0 52px 28px rgba(164, 207, 74, 0.12)",
+              }}
+            />
+            <div
+              className="absolute left-1/2 top-1/2 h-[20%] w-[72%] -translate-x-1/2 -translate-y-1/2 rounded-full"
+              style={{
+                background:
+                  "linear-gradient(90deg, transparent 0%, rgba(194, 242, 228, 0.42) 50%, transparent 100%)",
+              }}
+            />
+          </div>
+        </div>
+        {/* L1 柔焦擴散：全區空氣感（強 blur + 慢速位移） */}
         <motion.div
-          className="absolute inset-0"
-          animate={{ opacity: [0.26, 0.32, 0.26] }}
-          transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
+          className="absolute -left-[22%] top-[-10%] h-[74%] w-[60%] rounded-[64px]"
           style={{
             background:
-              "radial-gradient(ellipse 122% 90% at 52% 46%, rgba(20,82,58,0.42) 0%, rgba(14,61,47,0.34) 44%, rgba(9,42,40,0.22) 72%, transparent 100%)",
+              "radial-gradient(ellipse 72% 62% at 48% 44%, rgba(194, 242, 228, 0.28) 0%, rgba(53, 200, 180, 0.12) 48%, transparent 74%)",
+            filter: "blur(76px)",
+            opacity: 0.78,
           }}
+          animate={{ x: [0, 14, 0], y: [0, 8, 0], opacity: [0.65, 0.85, 0.65] }}
+          transition={{ duration: 36, repeat: Infinity, ease: "easeInOut" }}
         />
-        <div
-          className="absolute -left-[18%] top-[2%] h-[68%] w-[52%]"
+        <motion.div
+          className="absolute -right-[16%] top-[-6%] h-[52%] w-[48%] rounded-[56px]"
           style={{
-            clipPath: "polygon(0% 12%, 72% 0%, 100% 52%, 58% 100%, 0% 84%)",
-            opacity: 0.22,
             background:
-              "linear-gradient(142deg, rgba(26,110,73,0.56) 0%, rgba(18,78,61,0.34) 54%, rgba(14,58,52,0.12) 100%)",
-            transform: "rotate(-8deg)",
-          }}
-        />
-        <div
-          className="absolute right-[-14%] top-[-6%] h-[74%] w-[56%]"
-          style={{
-            clipPath: "polygon(22% 0%, 100% 18%, 84% 100%, 0% 84%)",
-            opacity: 0.18,
-            background:
-              "linear-gradient(132deg, rgba(28,96,70,0.44) 0%, rgba(19,72,60,0.28) 48%, rgba(12,50,55,0.12) 100%)",
-            transform: "rotate(10deg)",
-          }}
-        />
-        <div
-          className="absolute inset-0"
-          style={{
-            opacity: 0.1,
-            background:
-              "linear-gradient(126deg, transparent 0%, transparent 32%, rgba(203,253,60,0.18) 44%, transparent 56%, transparent 100%)",
-          }}
-        />
-        <div
-          className="absolute -left-[18%] top-[-12%] h-[68%] w-[66%] rounded-[52px]"
-          style={{
-            opacity: 0.3,
-            background:
-              "linear-gradient(150deg, rgba(21,86,63,0.64) 0%, rgba(14,63,52,0.48) 56%, rgba(10,43,44,0.3) 100%)",
-            filter: "blur(10px)",
-          }}
-        />
-        <div
-          className="absolute right-[-14%] top-[4%] h-[58%] w-[58%] rounded-[56px]"
-          style={{
-            opacity: 0.26,
-            background:
-              "linear-gradient(142deg, rgba(19,74,70,0.52) 0%, rgba(14,58,62,0.4) 42%, rgba(11,42,50,0.22) 100%)",
-            filter: "blur(11px)",
-          }}
-        />
-        <div
-          className="absolute left-[6%] top-[56%] h-[28%] w-[38%] rounded-[32px]"
-          style={{
-            opacity: 0.2,
-            transform: "rotate(-11deg)",
-            background:
-              "linear-gradient(135deg, rgba(10,41,31,0.48) 0%, rgba(12,59,45,0.24) 58%, rgba(12,59,45,0.02) 100%)",
-            filter: "blur(8px)",
-          }}
-        />
-        <div
-          className="absolute right-[9%] top-[24%] h-[4px] w-[126px] rounded-full"
-          style={{
-            background: "linear-gradient(90deg, rgba(199,255,58,0) 0%, rgba(199,255,58,0.75) 42%, rgba(199,255,58,0) 100%)",
-            opacity: 0.72,
-            transform: "rotate(-16deg)",
-          }}
-        />
-        <div
-          className="absolute left-[18%] bottom-[22%] h-[4px] w-[120px] rounded-full"
-          style={{
-            background: "linear-gradient(90deg, rgba(245,189,96,0) 0%, rgba(245,189,96,0.7) 46%, rgba(245,189,96,0) 100%)",
+              "radial-gradient(ellipse 70% 58% at 52% 42%, rgba(237, 247, 190, 0.26) 0%, rgba(194, 242, 228, 0.14) 50%, transparent 74%)",
+            filter: "blur(72px)",
             opacity: 0.62,
-            transform: "rotate(13deg)",
           }}
+          animate={{ x: [0, -10, 0], y: [0, 6, 0], opacity: [0.52, 0.72, 0.52] }}
+          transition={{ duration: 34, repeat: Infinity, ease: "easeInOut", delay: 1.2 }}
         />
-        <div
-          className="absolute right-[14%] bottom-[16%] h-[20%] w-[24%] rounded-[28px]"
+        <motion.div
+          className="absolute -right-[18%] bottom-[8%] h-[58%] w-[54%] rounded-[52px]"
           style={{
-            opacity: 0.18,
             background:
-              "linear-gradient(160deg, rgba(14,56,70,0.42) 0%, rgba(10,44,58,0.22) 70%, rgba(8,34,48,0.06) 100%)",
-            transform: "rotate(10deg)",
-            filter: "blur(8px)",
+              "radial-gradient(ellipse 68% 58% at 52% 52%, rgba(53, 200, 180, 0.18) 0%, rgba(15, 42, 40, 0.06) 52%, transparent 74%)",
+            filter: "blur(70px)",
+            opacity: 0.58,
+          }}
+          animate={{ x: [0, -12, 0], y: [0, 10, 0], opacity: [0.48, 0.65, 0.48] }}
+          transition={{ duration: 40, repeat: Infinity, ease: "easeInOut", delay: 2.5 }}
+        />
+        <motion.div
+          className="absolute left-[14%] top-[36%] h-[44%] w-[46%] rounded-[44px]"
+          style={{
+            background:
+              "radial-gradient(ellipse 62% 54% at 50% 50%, rgba(164, 207, 74, 0.1) 0%, transparent 68%)",
+            filter: "blur(82px)",
+            opacity: 0.52,
+          }}
+          animate={{ opacity: [0.42, 0.58, 0.42] }}
+          transition={{ duration: 28, repeat: Infinity, ease: "easeInOut", delay: 0.8 }}
+        />
+        <motion.div
+          className="absolute -left-[8%] bottom-[4%] h-[48%] w-[50%] rounded-[48px]"
+          style={{
+            background:
+              "radial-gradient(ellipse 68% 60% at 40% 55%, rgba(53, 200, 180, 0.14) 0%, rgba(12, 38, 36, 0.08) 55%, transparent 76%)",
+            filter: "blur(74px)",
+            opacity: 0.55,
+          }}
+          animate={{ x: [0, 8, 0], opacity: [0.48, 0.62, 0.48] }}
+          transition={{ duration: 32, repeat: Infinity, ease: "easeInOut", delay: 1.8 }}
+        />
+        {/* 中心：略壓暗以托字，改為冷綠霧（減厚重） */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(ellipse 92% 86% at 50% 45%, rgba(8, 32, 30, 0.28) 0%, rgba(10, 38, 36, 0.14) 38%, rgba(12, 42, 40, 0.06) 62%, transparent 84%)",
+            opacity: 0.72,
           }}
         />
-        <div className="absolute inset-0 opacity-75">
-          <svg viewBox="0 0 1200 900" className="h-full w-full">
-            <motion.path
-              d="M 40 760 C 210 680, 250 590, 370 520 C 505 445, 620 430, 710 360"
-              fill="none"
-              stroke="rgba(188,245,122,0.24)"
-              strokeWidth="2.1"
-              strokeLinecap="round"
-              strokeDasharray="7 11"
-              animate={{ strokeDashoffset: [0, -36] }}
-              transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
-            />
-            <motion.path
-              d="M 930 120 C 860 190, 835 255, 760 318 C 700 370, 655 402, 628 450"
-              fill="none"
-              stroke="rgba(146,214,255,0.19)"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeDasharray="5 10"
-              animate={{ strokeDashoffset: [0, -26] }}
-              transition={{ duration: 7, repeat: Infinity, ease: "linear" }}
-            />
-            <motion.circle
-              cx="370"
-              cy="520"
-              r="4.2"
-              fill="rgba(199,255,58,0.66)"
-              animate={{ opacity: [0.5, 1, 0.5], scale: [1, 1.18, 1] }}
-              transition={{ duration: 2.8, repeat: Infinity, ease: "easeInOut" }}
-            />
-            <motion.circle
-              cx="710"
-              cy="360"
-              r="4.6"
-              fill="rgba(247,196,103,0.64)"
-              animate={{ opacity: [0.45, 0.9, 0.45], scale: [1, 1.14, 1] }}
-              transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut", delay: 0.6 }}
-            />
-            <circle cx="760" cy="318" r="3.8" fill="rgba(176,225,255,0.42)" />
+        {/* L1b 霧面柔光：mint / brume 擴散 */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(ellipse 90% 75% at 50% 28%, rgba(194, 242, 228, 0.14) 0%, rgba(237, 247, 190, 0.06) 32%, transparent 58%), radial-gradient(ellipse 80% 60% at 18% 72%, rgba(53, 200, 180, 0.08) 0%, transparent 55%), radial-gradient(ellipse 75% 55% at 84% 68%, rgba(194, 242, 228, 0.1) 0%, transparent 52%), radial-gradient(ellipse 120% 90% at 50% 100%, rgba(12, 36, 34, 0.12) 0%, transparent 55%)",
+            filter: "blur(48px)",
+            opacity: 0.82,
+            mixBlendMode: "soft-light" as const,
+          }}
+        />
+        {/* L2 多層 grain：粒子感加強（底片＋細粉＋閃點） */}
+        <svg
+          className="absolute inset-0 h-full w-full opacity-[0.14] mix-blend-soft-light"
+          aria-hidden
+          viewBox="0 0 1200 900"
+          preserveAspectRatio="none"
+        >
+          <defs>
+            <filter id={grainFilmId} x="0" y="0" width="1200" height="900" filterUnits="userSpaceOnUse">
+              <feTurbulence type="fractalNoise" baseFrequency="0.52" numOctaves="4" stitchTiles="stitch" result="n" />
+              <feColorMatrix in="n" type="saturate" values="0" />
+            </filter>
+            <filter id={grainFineId} x="0" y="0" width="1200" height="900" filterUnits="userSpaceOnUse">
+              <feTurbulence type="fractalNoise" baseFrequency="1.75" numOctaves="2" stitchTiles="stitch" result="f" />
+              <feColorMatrix in="f" type="saturate" values="0" />
+            </filter>
+            <filter id={grainSparkId} x="0" y="0" width="1200" height="900" filterUnits="userSpaceOnUse">
+              <feTurbulence type="fractalNoise" baseFrequency="2.6" numOctaves="1" stitchTiles="stitch" result="s" />
+              <feColorMatrix in="s" type="saturate" values="0" />
+            </filter>
+          </defs>
+          <rect width="1200" height="900" filter={`url(#${grainFilmId})`} opacity={0.92} />
+          <rect width="1200" height="900" filter={`url(#${grainFineId})`} opacity={0.58} />
+          <rect width="1200" height="900" filter={`url(#${grainSparkId})`} opacity={0.34} />
+        </svg>
+        <svg
+          className="pointer-events-none absolute inset-0 h-full w-full opacity-[0.062] mix-blend-overlay"
+          aria-hidden
+          viewBox="0 0 1200 900"
+          preserveAspectRatio="none"
+        >
+          <defs>
+            <filter id={grainHiId} x="0" y="0" width="1200" height="900" filterUnits="userSpaceOnUse">
+              <feTurbulence type="fractalNoise" baseFrequency="3.2" numOctaves="1" stitchTiles="stitch" result="h" />
+              <feColorMatrix in="h" type="saturate" values="0" />
+            </filter>
+          </defs>
+          <rect width="1200" height="900" filter={`url(#${grainHiId})`} />
+        </svg>
+        {/* L2c 地圖感：極淡街網（亮底上略提亮線條，不搶主路徑） */}
+        <div className="pointer-events-none absolute inset-0 opacity-[0.62]">
+          <svg viewBox="0 0 1200 900" className="h-full w-full" preserveAspectRatio="xMidYMid slice" aria-hidden>
+            <defs>
+              <pattern id={`map-blocks-${heroBgUid}`} width="56" height="56" patternUnits="userSpaceOnUse">
+                <path d="M 56 0 L 0 0 0 56" fill="none" stroke="rgba(194, 242, 228, 0.11)" strokeWidth="0.5" />
+              </pattern>
+            </defs>
+            <rect width="1200" height="900" fill={`url(#map-blocks-${heroBgUid})`} opacity={0.38} />
+            <g opacity={0.1} fill="none" stroke="rgba(53, 200, 180, 0.35)" strokeWidth="0.55" strokeLinecap="round">
+              <path d="M 0 360 L 1200 330" strokeDasharray="3 18" />
+              <path d="M 0 520 L 1200 560" strokeDasharray="4 20" />
+              <path d="M 420 0 L 400 900" strokeDasharray="3 22" />
+              <path d="M 780 0 L 800 900" strokeDasharray="3 22" />
+              <path d="M 140 0 L 120 900" strokeDasharray="4 24" />
+              <path d="M 1080 0 L 1100 900" strokeDasharray="4 24" />
+              <path d="M 0 180 Q 600 240 1200 200" strokeDasharray="2 16" opacity={0.8} />
+            </g>
           </svg>
         </div>
-        <motion.div
-          className="absolute left-1/2 top-[42%] h-[52%] w-[64%] -translate-x-1/2 -translate-y-1/2"
-          animate={{ opacity: [0.2, 0.26, 0.2] }}
-          transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
+        {/* L3 主路徑：起伏旅程線 + 外層光暈 + 漸層描邊 + 沿線移動原點 */}
+        <div className="absolute inset-0 opacity-[0.95]">
+          <svg viewBox="0 0 1200 900" className="h-full w-full" preserveAspectRatio="xMidYMid slice" aria-hidden>
+            <defs>
+              <filter id={`path-aura-${heroBgUid}`} x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="b" />
+                <feMerge>
+                  <feMergeNode in="b" />
+                </feMerge>
+              </filter>
+              <linearGradient id={`ribbon-a-${heroBgUid}`} x1="0" y1="100%" x2="100%" y2="0%" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="rgba(215, 255, 95, 0.55)" />
+                <stop offset="35%" stopColor="rgba(195, 248, 175, 0.42)" />
+                <stop offset="100%" stopColor="rgba(120, 220, 235, 0.5)" />
+              </linearGradient>
+            </defs>
+            {/* 主旅程：中左迴圈（上移）+ 右側近圓弧至終點（C¹） */}
+            <g fill="none" strokeLinecap="round" strokeLinejoin="round">
+              {/* 最外柔光（迷霧中透出） */}
+              <path
+                d={HERO_JOURNEY_PATH}
+                stroke="rgba(185, 235, 220, 0.22)"
+                strokeWidth="28"
+                opacity={0.9}
+                filter={`url(#path-aura-${heroBgUid})`}
+              />
+              <path
+                d={HERO_JOURNEY_PATH}
+                stroke="rgba(230, 255, 200, 0.18)"
+                strokeWidth="16"
+                opacity={0.85}
+              />
+              {/* 主線：漸層描邊（ref 供原點動畫量測） */}
+              <path
+                ref={journeyPathRef}
+                d={HERO_JOURNEY_PATH}
+                stroke={`url(#ribbon-a-${heroBgUid})`}
+                strokeWidth="5.2"
+              />
+            </g>
+          </svg>
+        </div>
+        {/* L4 色域裝飾：淺檸檬 / mint 高光，不搶字 */}
+        <div
+          className="absolute inset-0"
+          style={{
+            opacity: 0.09,
+            background:
+              "linear-gradient(124deg, transparent 0%, transparent 28%, rgba(237, 247, 190, 0.14) 44%, rgba(194, 242, 228, 0.06) 54%, transparent 62%, transparent 100%)",
+          }}
+        />
+        <div
+          className="absolute -left-[16%] top-[-8%] h-[64%] w-[58%] rounded-[56px]"
+          style={{
+            opacity: 0.12,
+            background:
+              "linear-gradient(148deg, rgba(53, 200, 180, 0.18) 0%, rgba(194, 242, 228, 0.08) 55%, rgba(12, 38, 36, 0.04) 100%)",
+            filter: "blur(12px)",
+          }}
+        />
+        <div
+          className="absolute right-[-12%] bottom-[2%] h-[52%] w-[54%] rounded-[52px]"
+          style={{
+            opacity: 0.11,
+            background:
+              "linear-gradient(138deg, rgba(164, 207, 74, 0.12) 0%, rgba(53, 200, 180, 0.1) 50%, rgba(10, 36, 34, 0.05) 100%)",
+            filter: "blur(14px)",
+          }}
+        />
+        {/* L6 主標區可讀性：微亮芯 + 較輕的底部收斂 */}
+        <div
+          className="absolute inset-0"
           style={{
             background:
-              "radial-gradient(ellipse 62% 52% at 50% 52%, rgba(255,253,248,0.34) 0%, rgba(231,247,222,0.2) 34%, rgba(191,224,184,0.08) 58%, transparent 78%)",
-            filter: "blur(11px)",
+              "radial-gradient(ellipse 58% 48% at 50% 44%, rgba(255,253,248,0.07) 0%, transparent 62%), radial-gradient(ellipse 120% 100% at 50% 50%, transparent 42%, rgba(8, 28, 26, 0.16) 100%)",
+            opacity: 0.92,
           }}
         />
         <div
           className="absolute inset-0"
           style={{
-            opacity: 0.05,
+            opacity: 0.032,
             background:
-              "repeating-linear-gradient(120deg, rgba(255,255,255,0) 0px, rgba(255,255,255,0) 22px, rgba(255,255,255,0.35) 23px, rgba(255,255,255,0.35) 24px)",
+              "repeating-linear-gradient(118deg, rgba(255,255,255,0) 0px, rgba(255,255,255,0) 24px, rgba(255,255,255,0.3) 25px, rgba(255,255,255,0.3) 26px)",
           }}
         />
+        {/* L3b 旅程原點：疊在 L4/L6 之上，避免被全畫面霧面／暗角層遮住 */}
+        <svg
+          className="pointer-events-none absolute inset-0 z-[12] h-full w-full overflow-visible"
+          viewBox="0 0 1200 900"
+          preserveAspectRatio="xMidYMid slice"
+          aria-hidden
+        >
+          <g pointerEvents="none">
+            <circle
+              ref={journeyRingRef}
+              cx={-40}
+              cy={820}
+              r="18"
+              fill="none"
+              stroke="rgba(255,255,255,0.22)"
+              strokeWidth="0.8"
+              opacity={0.8}
+            />
+            <circle
+              ref={journeyRing2Ref}
+              cx={-40}
+              cy={820}
+              r="11"
+              fill="none"
+              stroke="rgba(255,255,255,0.32)"
+              strokeWidth="0.7"
+              opacity={0.88}
+            />
+            <circle
+              ref={journeyDotRef}
+              cx={-40}
+              cy={820}
+              r="5.5"
+              fill="#fde047"
+              stroke="rgba(255,255,255,0.65)"
+              strokeWidth="1"
+              style={{ filter: "drop-shadow(0 0 10px rgba(250,204,21,0.9))" }}
+            />
+          </g>
+        </svg>
       </div>
 
       {/* ── CONTENT (z-20) — always crisp, always visible ─────────────────── */}
@@ -647,17 +955,17 @@ export function HeroSection() {
         <div className="mx-auto max-w-4xl text-center">
           {/* Badge */}
           <motion.div
-            className="mb-8 inline-flex items-center gap-2.5 rounded-full border border-[#cbfd3c]/35 bg-emerald-950/45 px-5 py-2.5 text-sm font-medium text-[#fffdf8] shadow-[0_0_0_1px_rgba(203,253,60,0.08)_inset]"
+            className="mb-10 inline-flex items-center gap-3.5 rounded-full border border-[#cbfd3c]/35 bg-emerald-950/45 px-7 py-3.5 text-base font-medium text-[#fffdf8] shadow-[0_0_0_1px_rgba(203,253,60,0.08)_inset] md:mb-12 md:gap-4 md:px-9 md:py-4 md:text-lg"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.8, delay: 0.3, ease: "easeOut" }}
           >
             <motion.span
-              className="h-2 w-2 rounded-full bg-[#cbfd3c]"
+              className="h-3 w-3 shrink-0 rounded-full bg-[#cbfd3c] md:h-3.5 md:w-3.5"
               animate={{ scale: [1, 1.2, 1], opacity: [0.8, 1, 0.8] }}
               transition={{ duration: 2.5, repeat: Infinity }}
             />
-            <span className="rounded-sm bg-[#cbfd3c]/18 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-[#cbfd3c]">
+            <span className="rounded-md bg-[#cbfd3c]/18 px-2.5 py-1 text-xs font-bold tracking-wide text-[#cbfd3c] md:px-3 md:py-1.5 md:text-sm">
               NEW
             </span>
             賦能青年選擇力
@@ -707,96 +1015,16 @@ export function HeroSection() {
         </div>
       </div>
 
-      {/* ── Cursor-local multi-layer fog (big feather, no hard hole) ── */}
-      {/* Layer 1: full-screen environment fog */}
-      <div
-        ref={envFogRef}
+      {/* ── 單層互動霧：bitmap 直接繪製 + 柔邊 blur；不使用 mask-image / toDataURL，避免閃爍 ── */}
+      <canvas
+        ref={fogCanvasRef}
         className="pointer-events-none absolute inset-0"
         style={{
           zIndex: 30,
           opacity: 0.92,
-          filter: "blur(24px)",
-          willChange: "transform, -webkit-mask-image, mask-image",
-          background: `
-            linear-gradient(180deg,
-              rgba(255, 255, 255, 0.78) 0%,
-              rgba(253, 254, 254, 0.70) 30%,
-              rgba(251, 253, 253, 0.58) 55%,
-              rgba(245, 250, 248, 0.42) 78%,
-              rgba(240, 248, 245, 0.28) 100%
-            ),
-            radial-gradient(ellipse 130% 95% at 35% 25%,
-              rgba(255,255,255,0.45) 0%,
-              transparent 55%
-            ),
-            radial-gradient(ellipse 120% 90% at 75% 65%,
-              rgba(255,255,255,0.32) 0%,
-              transparent 60%
-            )
-          `,
+          filter: "blur(22px)",
         }}
       />
-
-      {/* Layer 2: thicker mid fog mass around the title */}
-      <div
-        ref={midFogRef}
-        className="pointer-events-none absolute inset-0"
-        style={{
-          zIndex: 31,
-          opacity: 0.86,
-          filter: "blur(16px)",
-          willChange: "transform, -webkit-mask-image, mask-image",
-          background: `
-            radial-gradient(ellipse 78% 58% at 50% 45%,
-              rgba(255, 255, 255, 0.98) 0%,
-              rgba(253, 254, 254, 0.92) 18%,
-              rgba(250, 252, 252, 0.76) 36%,
-              rgba(248, 251, 250, 0.46) 58%,
-              rgba(245, 250, 248, 0.20) 78%,
-              transparent 96%
-            ),
-            radial-gradient(ellipse 120% 110% at 50% 62%,
-              rgba(255,255,255,0.28) 0%,
-              transparent 70%
-            )
-          `,
-        }}
-      />
-
-      {/* Layer 3: floating fine mist */}
-      <div
-        ref={floatFogRef}
-        className="pointer-events-none absolute inset-0"
-        style={{
-          zIndex: 32,
-          opacity: 0.2,
-          filter: "blur(34px)",
-          willChange: "transform, -webkit-mask-image, mask-image",
-          background: `
-            radial-gradient(ellipse 38% 28% at 18% 35%,
-              rgba(255,255,255,0.55) 0%,
-              transparent 62%
-            ),
-            radial-gradient(ellipse 48% 32% at 45% 60%,
-              rgba(255,255,255,0.40) 0%,
-              transparent 64%
-            ),
-            radial-gradient(ellipse 44% 30% at 78% 40%,
-              rgba(255,255,255,0.50) 0%,
-              transparent 66%
-            ),
-            radial-gradient(ellipse 65% 45% at 60% 80%,
-              rgba(255,255,255,0.22) 0%,
-              transparent 68%
-            )
-          `,
-        }}
-      />
-
-      {/* Hidden canvases for persistent fog reveal masks */}
-      <canvas ref={envMaskCanvasRef} className="hidden" />
-      <canvas ref={midMaskCanvasRef} className="hidden" />
-      <canvas ref={floatMaskCanvasRef} className="hidden" />
 
       {/* ── SCROLL INDICATOR (z-40) ──────────────────────────────────────── */}
       <motion.div

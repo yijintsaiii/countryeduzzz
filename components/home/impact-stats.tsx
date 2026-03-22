@@ -141,7 +141,7 @@ export function ImpactStats() {
   const isInView = useInView(ref, { once: true, margin: "-100px" })
 
   return (
-    <section id="impact" className="group relative overflow-hidden py-20 lg:py-28" style={{ backgroundColor: 'var(--brand-cream)' }}>
+    <section id="impact" className="relative overflow-hidden py-20 lg:py-28" style={{ backgroundColor: 'var(--brand-cream)' }}>
       {/* Animated background orbs - warm tones */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <motion.div
@@ -195,9 +195,8 @@ export function ImpactStats() {
             strokeWidth="2"
             strokeLinecap="round"
             strokeDasharray="6 11"
-            animate={{ strokeDashoffset: [0, -44], opacity: [0.3, 0.5, 0.3] }}
+            animate={{ strokeDashoffset: [0, -52], opacity: [0.26, 0.48, 0.26] }}
             transition={{ duration: 14, repeat: Infinity, ease: "linear" }}
-            className="transition-opacity duration-500 group-hover:opacity-100"
           />
           <motion.circle
             cx="500"

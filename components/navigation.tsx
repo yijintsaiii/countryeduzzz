@@ -57,6 +57,7 @@ export function Navigation() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [openSubmenu, setOpenSubmenu] = useState<string | null>(null)
   const [isScrolled, setIsScrolled] = useState(false)
+  const [desktopMenuValue, setDesktopMenuValue] = useState<string>("")
 
   const { scrollY } = useScroll()
   const headerBg = useTransform(
@@ -82,34 +83,44 @@ export function Navigation() {
           : "bg-transparent"
       )}
     >
-      <div className="container mx-auto flex h-16 items-center justify-between px-4">
+      <div className="container mx-auto flex min-h-16 items-center justify-between px-4 py-2 lg:min-h-[4.25rem] lg:py-2.5">
         <Link href="/" className="flex items-center gap-2 group">
           <motion.div 
             whileHover={{ scale: 1.02 }}
             transition={{ type: "spring", stiffness: 400 }}
+            className={cn(
+              "rounded-lg transition-[box-shadow,background-color]",
+              !isScrolled &&
+                "bg-white/[0.06] shadow-[0_1px_0_rgba(255,255,255,0.12)_inset,0_8px_28px_-12px_rgba(0,0,0,0.35)] backdrop-blur-[2px]"
+            )}
           >
             <Image
               src="https://hebbkx1anhila5yf.public.blob.vercel-storage.com/Countryedu_LOGO%202023-04-NbVDmnNBZinzzwjQLnJ9pTJuSDPU3O.png"
               alt="財團法人鄉育教育基金會"
               width={180}
               height={45}
-              className={cn(
-                "h-auto w-[140px] lg:w-[180px] transition-all",
-                !isScrolled && "brightness-0 invert"
-              )}
+              className="h-auto w-[140px] drop-shadow-[0_2px_10px_rgba(0,0,0,0.35)] lg:w-[180px]"
               priority
             />
           </motion.div>
         </Link>
 
         {/* Desktop Navigation */}
-        <NavigationMenu className="hidden lg:flex" delayDuration={0} skipDelayDuration={0}>
-          <NavigationMenuList>
-            <NavigationMenuItem>
+        <NavigationMenu
+          className="hidden lg:flex"
+          delayDuration={0}
+          skipDelayDuration={0}
+          value={desktopMenuValue}
+          onValueChange={setDesktopMenuValue}
+        >
+          <NavigationMenuList className="gap-1.5">
+            <NavigationMenuItem value="about">
               <NavigationMenuTrigger className={cn(
-                "bg-transparent transition-colors relative after:absolute after:left-1/2 after:bottom-1 after:h-[2px] after:w-0 after:-translate-x-1/2 after:rounded-full after:bg-[#C7FF3A] after:transition-all data-[state=open]:after:w-7",
+                "h-11 min-h-11 bg-transparent px-5 text-base font-medium transition-colors relative after:absolute after:left-1/2 after:bottom-1 after:h-[2px] after:w-0 after:-translate-x-1/2 after:rounded-full after:bg-[#C7FF3A] after:transition-all data-[state=open]:after:w-7",
                 isScrolled ? "text-foreground" : "text-white/90 hover:text-white hover:bg-white/10"
-              )}>認識鄉育</NavigationMenuTrigger>
+              )} onPointerEnter={() => setDesktopMenuValue("about")}>
+                認識鄉育
+              </NavigationMenuTrigger>
               <NavigationMenuContent>
                 <ul className="grid w-[420px] gap-3 rounded-xl border border-emerald-900/10 bg-white/95 p-4 shadow-[0_16px_38px_-24px_rgba(5,46,22,0.45)] md:w-[520px] md:grid-cols-2">
                   {aboutLinks.map((link) => (
@@ -121,11 +132,13 @@ export function Navigation() {
               </NavigationMenuContent>
             </NavigationMenuItem>
 
-            <NavigationMenuItem>
+            <NavigationMenuItem value="programs">
               <NavigationMenuTrigger className={cn(
-                "bg-transparent transition-colors relative after:absolute after:left-1/2 after:bottom-1 after:h-[2px] after:w-0 after:-translate-x-1/2 after:rounded-full after:bg-[#C7FF3A] after:transition-all data-[state=open]:after:w-7",
+                "h-11 min-h-11 bg-transparent px-5 text-base font-medium transition-colors relative after:absolute after:left-1/2 after:bottom-1 after:h-[2px] after:w-0 after:-translate-x-1/2 after:rounded-full after:bg-[#C7FF3A] after:transition-all data-[state=open]:after:w-7",
                 isScrolled ? "text-foreground" : "text-white/90 hover:text-white hover:bg-white/10"
-              )}>大學專案</NavigationMenuTrigger>
+              )} onPointerEnter={() => setDesktopMenuValue("programs")}>
+                大學專案
+              </NavigationMenuTrigger>
               <NavigationMenuContent>
                 <ul className="grid w-[420px] gap-3 rounded-xl border border-emerald-900/10 bg-white/95 p-4 shadow-[0_16px_38px_-24px_rgba(5,46,22,0.45)] md:w-[520px] md:grid-cols-2">
                   {programLinks.map((link) => (
@@ -137,11 +150,13 @@ export function Navigation() {
               </NavigationMenuContent>
             </NavigationMenuItem>
 
-            <NavigationMenuItem>
+            <NavigationMenuItem value="impact">
               <NavigationMenuTrigger className={cn(
-                "bg-transparent transition-colors relative after:absolute after:left-1/2 after:bottom-1 after:h-[2px] after:w-0 after:-translate-x-1/2 after:rounded-full after:bg-[#C7FF3A] after:transition-all data-[state=open]:after:w-7",
+                "h-11 min-h-11 bg-transparent px-5 text-base font-medium transition-colors relative after:absolute after:left-1/2 after:bottom-1 after:h-[2px] after:w-0 after:-translate-x-1/2 after:rounded-full after:bg-[#C7FF3A] after:transition-all data-[state=open]:after:w-7",
                 isScrolled ? "text-foreground" : "text-white/90 hover:text-white hover:bg-white/10"
-              )}>影響力</NavigationMenuTrigger>
+              )} onPointerEnter={() => setDesktopMenuValue("impact")}>
+                影響力
+              </NavigationMenuTrigger>
               <NavigationMenuContent>
                 <ul className="grid w-[420px] gap-3 rounded-xl border border-emerald-900/10 bg-white/95 p-4 shadow-[0_16px_38px_-24px_rgba(5,46,22,0.45)] md:w-[520px] md:grid-cols-2">
                   {impactLinks.map((link) => (
@@ -153,11 +168,13 @@ export function Navigation() {
               </NavigationMenuContent>
             </NavigationMenuItem>
 
-            <NavigationMenuItem>
+            <NavigationMenuItem value="involve">
               <NavigationMenuTrigger className={cn(
-                "bg-transparent transition-colors relative after:absolute after:left-1/2 after:bottom-1 after:h-[2px] after:w-0 after:-translate-x-1/2 after:rounded-full after:bg-[#C7FF3A] after:transition-all data-[state=open]:after:w-7",
+                "h-11 min-h-11 bg-transparent px-5 text-base font-medium transition-colors relative after:absolute after:left-1/2 after:bottom-1 after:h-[2px] after:w-0 after:-translate-x-1/2 after:rounded-full after:bg-[#C7FF3A] after:transition-all data-[state=open]:after:w-7",
                 isScrolled ? "text-foreground" : "text-white/90 hover:text-white hover:bg-white/10"
-              )}>參與我們</NavigationMenuTrigger>
+              )} onPointerEnter={() => setDesktopMenuValue("involve")}>
+                參與我們
+              </NavigationMenuTrigger>
               <NavigationMenuContent>
                 <ul className="grid w-[420px] gap-3 rounded-xl border border-emerald-900/10 bg-white/95 p-4 shadow-[0_16px_38px_-24px_rgba(5,46,22,0.45)] md:w-[520px] md:grid-cols-2">
                   {involveLinks.map((link) => (
@@ -169,11 +186,13 @@ export function Navigation() {
               </NavigationMenuContent>
             </NavigationMenuItem>
 
-            <NavigationMenuItem>
+            <NavigationMenuItem value="audience">
               <NavigationMenuTrigger className={cn(
-                "bg-transparent transition-colors relative after:absolute after:left-1/2 after:bottom-1 after:h-[2px] after:w-0 after:-translate-x-1/2 after:rounded-full after:bg-[#C7FF3A] after:transition-all data-[state=open]:after:w-7",
+                "h-11 min-h-11 bg-transparent px-5 text-base font-medium transition-colors relative after:absolute after:left-1/2 after:bottom-1 after:h-[2px] after:w-0 after:-translate-x-1/2 after:rounded-full after:bg-[#C7FF3A] after:transition-all data-[state=open]:after:w-7",
                 isScrolled ? "text-foreground" : "text-white/90 hover:text-white hover:bg-white/10"
-              )}>依身分瀏覽</NavigationMenuTrigger>
+              )} onPointerEnter={() => setDesktopMenuValue("audience")}>
+                依身分瀏覽
+              </NavigationMenuTrigger>
               <NavigationMenuContent>
                 <ul className="grid w-[420px] gap-3 rounded-xl border border-emerald-900/10 bg-white/95 p-4 shadow-[0_16px_38px_-24px_rgba(5,46,22,0.45)] md:w-[520px] md:grid-cols-2">
                   {audienceLinks.map((link) => (
@@ -190,7 +209,7 @@ export function Navigation() {
                 <Link 
                   href="/news" 
                   className={cn(
-                    "group inline-flex h-10 w-max items-center justify-center rounded-md bg-transparent px-4 py-2 text-sm font-medium transition-colors focus:outline-none disabled:pointer-events-none disabled:opacity-50 hover:shadow-[0_0_0_1px_rgba(199,255,58,0.45)_inset]",
+                    "group inline-flex h-11 min-h-11 w-max items-center justify-center rounded-md bg-transparent px-5 py-2 text-base font-medium transition-colors focus:outline-none disabled:pointer-events-none disabled:opacity-50 hover:shadow-[0_0_0_1px_rgba(199,255,58,0.45)_inset]",
                     isScrolled 
                       ? "text-foreground hover:bg-accent hover:text-accent-foreground" 
                       : "text-white/90 hover:text-white hover:bg-white/10"
@@ -207,7 +226,7 @@ export function Navigation() {
           <Button 
             variant="ghost" 
             className={cn(
-              "transition-colors",
+              "h-11 min-h-11 px-5 text-base font-medium transition-colors",
               isScrolled ? "" : "text-white/90 hover:text-white hover:bg-white/10"
             )}
             asChild
@@ -217,7 +236,7 @@ export function Navigation() {
           <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.98 }}>
             <Button 
               className={cn(
-                "transition-all",
+                "h-11 min-h-11 px-6 text-base font-medium transition-all",
                 isScrolled 
                   ? "" 
                   : "bg-white/20 text-white hover:bg-white/30 backdrop-blur-sm border border-white/30"
