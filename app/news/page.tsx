@@ -187,31 +187,6 @@ export default function NewsPage() {
             </div>
           </div>
         </section>
-
-        {/* Newsletter */}
-        <section className="py-16 md:py-24">
-          <div className="container mx-auto px-4">
-            <div className="mx-auto max-w-xl text-center">
-              <h2 className="text-2xl font-bold tracking-tight text-foreground md:text-3xl">
-                訂閱電子報
-              </h2>
-              <p className="mt-4 text-muted-foreground">
-                定期收到鄉育的最新消息、活動資訊與教育洞察
-              </p>
-              <div className="mt-6 flex gap-2">
-                <input
-                  type="email"
-                  placeholder="輸入您的 Email"
-                  className="flex-1 rounded-md border border-input bg-background px-4 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <Button>訂閱</Button>
-              </div>
-              <p className="mt-2 text-xs text-muted-foreground">
-                我們尊重您的隱私，不會將您的資料分享給第三方
-              </p>
-            </div>
-          </div>
-        </section>
       </main>
       <Footer />
     </div>

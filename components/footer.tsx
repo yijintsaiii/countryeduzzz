@@ -3,7 +3,6 @@
 import Link from "next/link"
 import Image from "next/image"
 import { Facebook, Youtube, Mail, Phone, MapPin, MessageCircle } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { motion } from "framer-motion"
 
 const footerLinks = {
@@ -191,22 +190,6 @@ export function Footer() {
                   ))}
                 </ul>
               </div>
-            </div>
-          </div>
-
-          {/* Newsletter Section */}
-          <div className="mt-12 rounded-2xl border border-border/50 bg-card/50 p-6 backdrop-blur-sm md:flex md:items-center md:justify-between md:p-8">
-            <div>
-              <h3 className="text-base font-semibold text-foreground">訂閱鄉育電子報</h3>
-              <p className="mt-1 text-sm text-muted-foreground">接收最新活動資訊與青年成長故事</p>
-            </div>
-            <div className="mt-4 flex gap-3 md:mt-0">
-              <input
-                type="email"
-                placeholder="輸入電子郵件"
-                className="h-10 flex-1 rounded-lg border border-input bg-background px-4 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-green md:w-64"
-              />
-              <Button className="bg-brand-green hover:bg-brand-green-dark">訂閱</Button>
             </div>
           </div>
         </div>

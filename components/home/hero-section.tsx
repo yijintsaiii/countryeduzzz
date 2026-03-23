@@ -37,8 +37,13 @@ export function HeroSection() {
   const lastStampRef = useRef<{ x: number; y: number } | null>(null)
   const lastPointerEventAtRef = useRef(0)
   const isMobileScrollModeRef = useRef(false)
-  /** 手機／粗指：點一下即關閉互動霧（不再依捲動漸隱） */
-  const mobileFogDismissedRef = useRef(false)
+  const mobileClearProgressRef = useRef(0)
+  /** 手機：單次漸進淡出動畫進行中（避免重複觸發） */
+  const mobileFogAnimActiveRef = useRef(false)
+  const mobileFogRafRef = useRef<number | null>(null)
+  /** 手機：辨識輕觸 vs 滑動捲動 */
+  const mobileTapStartRef = useRef<{ x: number; y: number } | null>(null)
+  const prevMobileModeRef = useRef<boolean | null>(null)
 
   // For "almost clear" end-state (still persistent, never recovers).
   const pathEnergyRef = useRef(0)
@@ -69,6 +74,52 @@ export function HeroSection() {
   useEffect(() => {
     // Intentionally no-op (pointerType filtering is the primary guard).
   }, [])
+
+  const syncFogCanvasOpacity = useCallback(() => {
+    const el = fogCanvasRef.current
+    if (!el) return
+    if (isMobileScrollModeRef.current) {
+      const p = mobileClearProgressRef.current
+      el.style.opacity = `${0.92 - p * 0.82}`
+    } else {
+      el.style.opacity = "0.92"
+    }
+  }, [])
+
+  const startMobileFogClearAnimation = useCallback(() => {
+    if (!isMobileScrollModeRef.current) return
+    if (mobileClearProgressRef.current >= 0.999) return
+    if (mobileFogAnimActiveRef.current) return
+
+    mobileFogAnimActiveRef.current = true
+    if (mobileFogRafRef.current != null) {
+      cancelAnimationFrame(mobileFogRafRef.current)
+      mobileFogRafRef.current = null
+    }
+
+    const start = performance.now()
+    const duration = 2400
+    const from = mobileClearProgressRef.current
+
+    const easeOutCubic = (t: number) => 1 - (1 - t) ** 3
+
+    const step = (now: number) => {
+      const elapsed = now - start
+      const t = Math.min(1, elapsed / duration)
+      const eased = easeOutCubic(t)
+      mobileClearProgressRef.current = from + (1 - from) * eased
+      syncFogCanvasOpacity()
+      if (t < 1) {
+        mobileFogRafRef.current = requestAnimationFrame(step)
+      } else {
+        mobileClearProgressRef.current = 1
+        syncFogCanvasOpacity()
+        mobileFogRafRef.current = null
+        mobileFogAnimActiveRef.current = false
+      }
+    }
+    mobileFogRafRef.current = requestAnimationFrame(step)
+  }, [syncFogCanvasOpacity])
 
   useEffect(() => {
     /** 合併原三層霧的視覺權重在單一 bitmap（再由 CSS blur 柔化邊緣） */
@@ -135,16 +186,6 @@ export function HeroSection() {
       ctx.globalAlpha = 1
     }
 
-    const syncFogCanvasOpacity = () => {
-      const el = fogCanvasRef.current
-      if (!el) return
-      if (isMobileScrollModeRef.current && mobileFogDismissedRef.current) {
-        el.style.opacity = "0"
-        return
-      }
-      el.style.opacity = "0.92"
-    }
-
     const initFogCanvas = () => {
       const canvas = fogCanvasRef.current
       if (!canvas) return
@@ -166,6 +207,14 @@ export function HeroSection() {
       syncFogCanvasOpacity()
     }
 
+    const cancelMobileFogAnim = () => {
+      if (mobileFogRafRef.current != null) {
+        cancelAnimationFrame(mobileFogRafRef.current)
+        mobileFogRafRef.current = null
+      }
+      mobileFogAnimActiveRef.current = false
+    }
+
     const updateHeroRect = () => {
       if (!containerRef.current) return
       const r = containerRef.current.getBoundingClientRect()
@@ -181,10 +230,13 @@ export function HeroSection() {
         y: heroRectRef.current.height / 2,
       }
 
-      isMobileScrollModeRef.current = window.matchMedia("(max-width: 1024px), (pointer: coarse)").matches
-      if (!isMobileScrollModeRef.current) {
-        mobileFogDismissedRef.current = false
+      const nextMobile = window.matchMedia("(max-width: 1024px), (pointer: coarse)").matches
+      if (prevMobileModeRef.current !== null && prevMobileModeRef.current !== nextMobile) {
+        cancelMobileFogAnim()
+        mobileClearProgressRef.current = 0
       }
+      prevMobileModeRef.current = nextMobile
+      isMobileScrollModeRef.current = nextMobile
 
       lastStampRef.current = null
       pathEnergyRef.current = 0
@@ -199,31 +251,13 @@ export function HeroSection() {
 
     return () => {
       window.removeEventListener("resize", updateHeroRect)
+      cancelMobileFogAnim()
     }
-  }, [])
+  }, [syncFogCanvasOpacity])
 
   const scrollToNext = () => {
     document.getElementById("audience")?.scrollIntoView({ behavior: "smooth" })
   }
-
-  const dismissMobileFog = useCallback(() => {
-    if (!isMobileScrollModeRef.current) return
-    if (mobileFogDismissedRef.current) return
-    mobileFogDismissedRef.current = true
-    const el = fogCanvasRef.current
-    if (el) el.style.opacity = "0"
-  }, [])
-
-  /** 手機／粗指：第一次點擊畫面即立刻關閉迷霧（不依捲動） */
-  const handleHeroPointerDown = useCallback(
-    (e: React.PointerEvent<HTMLElement>) => {
-      if (!isMobileScrollModeRef.current) return
-      if (mobileFogDismissedRef.current) return
-      if (e.pointerType === "mouse") return
-      dismissMobileFog()
-    },
-    [dismissMobileFog]
-  )
 
   const stampAtPoint = useCallback(
     (x: number, y: number, mode: "mouse" | "touch") => {
@@ -362,7 +396,11 @@ export function HeroSection() {
   }
 
   const handleHeroTouchStart = useCallback((e: any) => {
-    if (isMobileScrollModeRef.current) return
+    if (isMobileScrollModeRef.current) {
+      const t = e.touches?.[0]
+      if (t) mobileTapStartRef.current = { x: t.clientX, y: t.clientY }
+      return
+    }
     if (!containerRef.current) return
     const pt = e?.touches?.[0]
     if (!pt) return
@@ -387,7 +425,39 @@ export function HeroSection() {
     stampAtPoint(xy.x, xy.y, "touch")
   }, [stampAtPoint])
 
-  const handleHeroTouchEnd = useCallback(() => {
+  const handleHeroTouchEnd = useCallback(
+    (e: any) => {
+      if (isMobileScrollModeRef.current) {
+        const start = mobileTapStartRef.current
+        mobileTapStartRef.current = null
+        if (start && e.changedTouches?.[0]) {
+          const t = e.changedTouches[0]
+          const dx = t.clientX - start.x
+          const dy = t.clientY - start.y
+          if (Math.hypot(dx, dy) <= 14) {
+            startMobileFogClearAnimation()
+          }
+        }
+        return
+      }
+      isTouchInteractingRef.current = false
+      touchIdRef.current = null
+      lastStampRef.current = null
+    },
+    [startMobileFogClearAnimation]
+  )
+
+  /** 手機：部分瀏覽器需 click 才觸發；與 touchEnd 並存，動畫內有去重 */
+  const handleHeroClickMobileFog = useCallback(() => {
+    if (!isMobileScrollModeRef.current) return
+    startMobileFogClearAnimation()
+  }, [startMobileFogClearAnimation])
+
+  const handleHeroTouchCancel = useCallback(() => {
+    if (isMobileScrollModeRef.current) {
+      mobileTapStartRef.current = null
+      return
+    }
     isTouchInteractingRef.current = false
     touchIdRef.current = null
     lastStampRef.current = null
@@ -454,11 +524,11 @@ export function HeroSection() {
       onPointerEnter={handleHeroMouseEnter}
       onPointerMove={handleHeroMouseMove}
       onPointerLeave={handleHeroMouseLeave}
-      onPointerDown={handleHeroPointerDown}
       onTouchStart={handleHeroTouchStart}
       onTouchMove={handleHeroTouchMove}
       onTouchEnd={handleHeroTouchEnd}
-      onTouchCancel={handleHeroTouchEnd}
+      onTouchCancel={handleHeroTouchCancel}
+      onClick={handleHeroClickMobileFog}
     >
       {/* ── Hero 背景視覺（z-0）：底層橫向色帶 + 星點 + mint-aqua 色場 + grain（不碰互動霧、文案、路徑幾何） ─ */}
       <div className="pointer-events-none absolute inset-0 z-0">

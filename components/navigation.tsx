@@ -209,7 +209,7 @@ export function Navigation() {
                 <Link 
                   href="/news" 
                   className={cn(
-                    "group inline-flex h-11 min-h-11 w-max items-center justify-center rounded-md bg-transparent px-5 py-2 text-base font-medium transition-colors focus:outline-none disabled:pointer-events-none disabled:opacity-50 hover:shadow-[0_0_0_1px_rgba(199,255,58,0.45)_inset]",
+                    "group inline-flex h-11 min-h-11 w-max items-center justify-center rounded-md bg-transparent px-5 !text-base font-medium leading-none transition-colors focus:outline-none disabled:pointer-events-none disabled:opacity-50 hover:shadow-[0_0_0_1px_rgba(199,255,58,0.45)_inset]",
                     isScrolled 
                       ? "text-foreground hover:bg-accent hover:text-accent-foreground" 
                       : "text-white/90 hover:text-white hover:bg-white/10"

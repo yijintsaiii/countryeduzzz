@@ -4,48 +4,38 @@ import { useEffect, useRef } from "react"
 import Link from "next/link"
 import { motion, useInView, useSpring, useTransform } from "framer-motion"
 import { Button } from "@/components/ui/button"
-import { Users, School, Building2, TrendingUp } from "lucide-react"
+import { BookOpen, Users, Building2 } from "lucide-react"
 
 const stats = [
   {
-    icon: Users,
-    value: 2500,
+    icon: BookOpen,
+    value: 150,
     suffix: "+",
-    label: "累計服務學生",
-    description: "來自全台超過 45 所大專院校",
+    label: "累計課堂數量",
+    description: "從探索到實作，持續發生。",
     color: "var(--brand-green)",
     bgColor: "var(--brand-green-light)",
     glowColor: "rgba(80, 140, 100, 0.35)",
   },
   {
-    icon: School,
-    value: 45,
-    suffix: "",
-    label: "合作大專院校",
-    description: "遍布北中南東各地區",
+    icon: Users,
+    value: 2500,
+    suffix: "+",
+    label: "累計服務學生",
+    description: "陪伴更多學生看見自己的方向。",
     color: "var(--brand-green-dark)",
     bgColor: "var(--brand-green-light)",
     glowColor: "rgba(60, 120, 80, 0.35)",
   },
   {
     icon: Building2,
-    value: 120,
+    value: 10,
     suffix: "+",
     label: "企業夥伴",
-    description: "提供實習、專案與職涯分享",
+    description: "串連真實場域與多元職涯可能。",
     color: "var(--brand-brown)",
     bgColor: "var(--brand-yellow-light)",
     glowColor: "rgba(180, 150, 100, 0.35)",
-  },
-  {
-    icon: TrendingUp,
-    value: 94,
-    suffix: "%",
-    label: "學員推薦意願",
-    description: "願意推薦給學弟妹參加",
-    color: "var(--brand-brown)",
-    bgColor: "var(--brand-brown-light)",
-    glowColor: "rgba(140, 120, 90, 0.35)",
   },
 ]
 
@@ -230,15 +220,15 @@ export function ImpactStats() {
             鄉育的足跡
           </motion.span>
           <h2 className="text-3xl font-bold text-foreground md:text-4xl lg:text-5xl">
-            <span className="text-balance">這些年，我們一起走過的路</span>
+            <span className="text-balance">把支持變成可衡量的影響</span>
           </h2>
           <p className="mt-5 text-lg text-muted-foreground leading-relaxed">
-            每個數字背後，都是真實的陪伴與成長
+            每一個數字背後，都是學生真實的探索與成長。
           </p>
         </motion.div>
 
         {/* Stats grid */}
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mx-auto grid max-w-5xl gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {stats.map((stat, index) => (
             <StatCard key={stat.label} stat={stat} index={index} />
           ))}
